@@ -940,6 +940,10 @@ function formatoNivel(hoja, ordenada, nivel) {
   const expandir = (n) => {
     let f = cadena(n);
     if (f === null) f = ordenada ? '%d.' : '-';
+    // «%p» es el numero del propio nivel con su «enumeration-style»
+    // (decimal, letras, romanos): aqui se normaliza a «%d» y el estilo
+    // lo aporta «estiloNivel» en cada emisor.
+    f = f.split('%p').join('%d');
     if (f.includes('%*')) {
       const padre = n > 0 ? expandir(n - 1) : '';
       f = f.split('%*').join(padre);
@@ -953,6 +957,52 @@ function formatoNivel(hoja, ordenada, nivel) {
   };
 
   return expandir(nivel);
+}
+
+/** «enumeration-style» del nivel de lista (decimal, letras, romanos). */
+function estiloNivel(hoja, ordenada, nivel) {
+  const palabra = ordenada ? 'list-ordered' : 'list-unordered';
+  for (let n = nivel; n >= 0; n--) {
+    const sel = new Array(n + 1).fill(palabra).join(' ');
+    const v = hoja.palabra(sel, 'enumeration-style', null);
+    if (v) return v;
+  }
+  return 'decimal';
+}
+
+const ROMANOS = [
+  [1000, 'M'], [900, 'CM'], [500, 'D'], [400, 'CD'], [100, 'C'], [90, 'XC'],
+  [50, 'L'], [40, 'XL'], [10, 'X'], [9, 'IX'], [5, 'V'], [4, 'IV'], [1, 'I'],
+];
+
+/** Formatea un numero segun el estilo de enumeracion de Ulysses. */
+function formatearNumero(n, estilo) {
+  const alfa = (v) => {
+    let s = '';
+    while (v > 0) {
+      v--;
+      s = String.fromCharCode(65 + (v % 26)) + s;
+      v = Math.floor(v / 26);
+    }
+    return s;
+  };
+  const romano = (v) => {
+    let s = '';
+    for (const [valor, letras] of ROMANOS) {
+      while (v >= valor) {
+        s += letras;
+        v -= valor;
+      }
+    }
+    return s;
+  };
+  switch (String(estilo || 'decimal')) {
+    case 'lowercase-alpha': case 'alpha': return alfa(n).toLowerCase();
+    case 'uppercase-alpha': case 'alpha-upper': return alfa(n);
+    case 'lowercase-roman': case 'roman': return romano(n).toLowerCase();
+    case 'uppercase-roman': case 'roman-upper': return romano(n);
+    default: return String(n);
+  }
 }
 
 /**
@@ -1006,9 +1056,17 @@ function numeracionXml(hoja, base, numeraciones) {
       const texto = formatoNivel(hoja, ordenada, i);
       const { izquierda, colgante } = sangriaNivel(hoja, base, ordenada, i);
       const esNumero = /%\d/.test(texto);
+      const FORMATOS_OOXML = {
+        decimal: 'decimal',
+        'lowercase-alpha': 'lowerLetter', alpha: 'lowerLetter',
+        'uppercase-alpha': 'upperLetter', 'alpha-upper': 'upperLetter',
+        'lowercase-roman': 'lowerRoman', roman: 'lowerRoman',
+        'uppercase-roman': 'upperRoman', 'roman-upper': 'upperRoman',
+      };
+      const numFmt = esNumero ? FORMATOS_OOXML[estiloNivel(hoja, ordenada, i)] || 'decimal' : 'bullet';
       out +=
         `<w:lvl w:ilvl="${i}"><w:start w:val="1"/>` +
-        `<w:numFmt w:val="${esNumero ? 'decimal' : 'bullet'}"/>` +
+        `<w:numFmt w:val="${numFmt}"/>` +
         `<w:lvlText w:val="${D.esc(texto)}"/><w:lvlJc w:val="left"/>` +
         `<w:pPr><w:ind w:left="${D.twips(izquierda)}" w:hanging="${D.twips(colgante)}"/></w:pPr>` +
         `<w:rPr><w:rFonts w:ascii="${familia}" w:hAnsi="${familia}"/></w:rPr></w:lvl>`;
@@ -1114,7 +1172,8 @@ function reglasDe(hoja, selectores, base, selectorCss) {
  *   «%1.%2»    -> counter(ulxo0) "." counter(ulxo1)
  *   «-»        -> "-"
  */
-function contenidoMarcador(formato, ordenada) {
+function contenidoMarcador(formato, ordenada, estiloCss) {
+  const sufijo = estiloCss && estiloCss !== 'decimal' ? `, ${estiloCss}` : '';
   if (!ordenada) return JSON.stringify(String(formato));
   const partes = [];
   const re = /%(\d)/g;
@@ -1123,7 +1182,7 @@ function contenidoMarcador(formato, ordenada) {
   while ((m = re.exec(formato))) {
     const literal = formato.slice(ultimo, m.index);
     if (literal) partes.push(JSON.stringify(literal));
-    partes.push(`counter(ulxo${Number(m[1]) - 1})`);
+    partes.push(`counter(ulxo${Number(m[1]) - 1}${sufijo})`);
     ultimo = m.index + m[0].length;
   }
   const cola = formato.slice(ultimo);
@@ -1290,6 +1349,13 @@ function construirCss(hoja, opciones) {
       const previa = n === 0 ? 0 : sangriaNivel(hoja, base, ordenada, n - 1).izquierda;
       const relleno = Math.max(0, izquierda - previa);
       const formato = formatoNivel(hoja, ordenada, n);
+      const ESTILOS_CSS = {
+        'lowercase-alpha': 'lower-alpha', alpha: 'lower-alpha',
+        'uppercase-alpha': 'upper-alpha', 'alpha-upper': 'upper-alpha',
+        'lowercase-roman': 'lower-roman', roman: 'lower-roman',
+        'uppercase-roman': 'upper-roman', 'roman-upper': 'upper-roman',
+      };
+      const estiloCss = ESTILOS_CSS[estiloNivel(hoja, ordenada, n)] || 'decimal';
       const contador = `ulx${ordenada ? 'o' : 'u'}${n}`;
 
       reglas.push(
@@ -1303,7 +1369,7 @@ function construirCss(hoja, opciones) {
           `}`
       );
       reglas.push(
-        `${sel} > li::before { content: ${contenidoMarcador(formato, ordenada)}; ` +
+        `${sel} > li::before { content: ${contenidoMarcador(formato, ordenada, estiloCss)}; ` +
           `display: inline-block; width: ${pt(colgante)}; text-indent: 0; }`
       );
     }
@@ -1670,6 +1736,8 @@ function construirHtml(documento, hoja, opciones) {
 
 module.exports = {
   ajustesPagina,
+  estiloNivel,
+  formatearNumero,
   selectoresDe,
   construirDocx,
   construirCss,

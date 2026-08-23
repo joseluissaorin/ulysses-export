@@ -192,6 +192,12 @@ function compilarPdf(compilador, documento, hoja, opciones) {
   };
 
   const primera = TYPST.construirTypst(documento, hoja, opciones);
+  if (primera.geo.columnas > 1) {
+    // Con varias columnas el ajuste a píxel razona mal (mezcla columnas):
+    // la primera pasada ya queda a menos de medio píxel de Chromium.
+    const pdf = compilar(primera.fuente, primera.recursos);
+    return { pdf, avisos: primera.avisos };
+  }
   compilar(primera.fuente, primera.recursos);
   const posiciones = posicionesDeBloques(compilador);
   const ajuste = TYPST.calcularAjuste(primera.bloques, posiciones, primera.geo);

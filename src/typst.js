@@ -81,8 +81,13 @@ function geometria(pagina) {
   const derecha = anchoPt - izquierda - anchoCont * PX;
   const inferior = altoPt - superior - altoCont * PX;
 
+  const columnas = Math.max(1, pagina.columnas || 1);
+  // Ancho de cada columna, como lo calcula CSS: (ancho - huecos) / n
+  const huecoPx = lu(ptApx(pagina.separacionColumnas || 0));
+  const anchoColumna = columnas > 1 ? lu((anchoCont - huecoPx * (columnas - 1)) / columnas) : anchoCont;
+
   return {
-    anchoPt, altoPt, anchoCont, altoCont, ox, oy,
+    anchoPt, altoPt, anchoCont, altoCont, ox, oy, columnas, huecoPx, anchoColumna,
     margenes: { izquierda, superior, derecha, inferior },
     mlPx, mrPx, mtPx, mbPx, pagPxW, pagPxH,
     // Altura de página tal como la ve la caja de margen (sin factor S)
@@ -115,13 +120,31 @@ function familiasDePila(pila) {
  */
 function resolverFamilia(catalogo, pila) {
   const familias = familiasDePila(pila);
+  const generica = (nombre) => {
+    for (const g of GENERICAS[nombre]) if (catalogo.tieneFamilia(g)) return g;
+    return null;
+  };
   for (const f of familias) {
-    if (GENERICAS[f.toLowerCase()]) {
-      for (const g of GENERICAS[f.toLowerCase()]) if (catalogo.tieneFamilia(g)) return g;
+    const n = f.toLowerCase();
+    if (GENERICAS[n]) {
+      const g = generica(n);
+      if (g) return g;
       continue;
     }
     if (catalogo.tieneFamilia(f)) return f;
+    // Como fontconfig: una familia conocida pero no instalada se
+    // sustituye por su genérica sensata AQUÍ, antes de seguir la pila.
+    const alias =
+      /courier|mono|consol|menlo|monaco/.test(n) ? 'monospace' :
+      /helvetica|arial|verdana|tahoma|geneva|avenir|futura|gill|optima|segoe|myriad/.test(n) ? 'sans-serif' :
+      null;
+    if (alias) {
+      const g = generica(alias);
+      if (g) return g;
+    }
   }
+  const g = generica('serif');
+  if (g) return g;
   // Sin nada instalado: lo primero que haya
   const todas = catalogo.familias();
   return todas.length ? todas[0] : familias[0] || 'serif';
@@ -474,7 +497,7 @@ function construirTypst(documento, hoja, opciones) {
       lh,
       tramos,
       familiaCodigo: extra.familiaCodigo || familiaCodigoDe(),
-      anchoDisponible: geo.anchoCont - ml - mr,
+      anchoDisponible: geo.anchoColumna - ml - mr,
       fuentePx: f.pxAvances,
     };
     // El «strut» del párrafo siempre cuenta en la caja de línea
@@ -771,6 +794,16 @@ function construirTypst(documento, hoja, opciones) {
   function emitirBloques(bloques, padre, ctx) {
     let anterior = null; // etiqueta HTML del hermano anterior
     let primero = true;
+    // Márgenes heredados de contenedores (blockquote): se suman a los de
+    // cada hijo en vez de envolverlos en un block de Typst, porque dentro
+    // de un contenedor no puede haber saltos de página.
+    const mlExtra = ctx.mlExtra || 0;
+    const mrExtra = ctx.mrExtra || 0;
+    const emitir = (est, nodos, extra) => {
+      est.ml = (est.ml || 0) + mlExtra;
+      est.mr = (est.mr || 0) + mrExtra;
+      parrafo(est, nodos, extra);
+    };
     for (const b of bloques || []) {
       const esPrimeroDelArticulo = ctx.articulo && primero;
       switch (b.tipo) {
@@ -778,7 +811,7 @@ function construirTypst(documento, hoja, opciones) {
           const est = computar(padre, declH[b.nivel - 1]);
           if (saltoH1 && b.nivel === 1 && !esPrimeroDelArticulo) est.saltoAntes = true;
           if (est.saltoAntes) saltoDePagina();
-          parrafo(est, b.hijos, { sticky: est.mantener });
+          emitir(est, b.hijos, { sticky: est.mantener });
           if (est.saltoDespues) saltoDePagina();
           anterior = `h${b.nivel}`;
           break;
@@ -809,7 +842,7 @@ function construirTypst(documento, hoja, opciones) {
               est.sangria = -dialogoGeo.colgante;
               est.pb = 0;
               if (k > 0) est.pt = 0;
-              parrafo(est, l.hijos, {});
+              emitir(est, l.hijos, {});
               anterior = 'p';
             });
             break;
@@ -831,7 +864,7 @@ function construirTypst(documento, hoja, opciones) {
               const sangriaLinea = E.sangriaDeLinea(l, unidadTab);
               est.ml = (est.ml || 0) + sangriaVersoPt + sangriaLinea;
               est.sangria = -sangriaVersoPt;
-              parrafo(est, l.hijos, { indivisible: true });
+              emitir(est, l.hijos, { indivisible: true });
               anterior = 'p';
             });
             break;
@@ -847,18 +880,26 @@ function construirTypst(documento, hoja, opciones) {
             // li > p { margin: 0; padding: 0; text-indent: 0 }
             est.pt = 0; est.pb = 0; est.ml = 0; est.mr = 0; est.sangria = 0;
           }
-          parrafo(est, b.hijos, {});
+          emitir(est, b.hijos, {});
           anterior = 'p';
           break;
         }
 
         case 'blockquote': {
           const est = computar(padre, declCita);
-          // El blockquote es un contenedor: su relleno y márgenes envuelven
-          // a los párrafos de dentro.
-          emitirContenedor(est, () => {
-            emitirBloques(b.bloques, Object.assign({}, est, { pt: 0, pb: 0, ml: 0, mr: 0 }), { enCita: true });
+          // La cita no envuelve a sus hijos en un block (dentro no podría
+          // haber saltos de página): sus márgenes se suman a los de los
+          // hijos y sus rellenos son bloques espaciadores que, si no caben,
+          // se parten igual que el relleno de Blink.
+          const ptCita = lu(ptApx(est.pt || 0));
+          const pbCita = lu(ptApx(est.pb || 0));
+          if (ptCita > 0) salida.push(`#block(width: 100%, above: 0pt, below: 0pt, height: ${ptTypst(ptCita)}, breakable: true)`);
+          emitirBloques(b.bloques, Object.assign({}, est, { pt: 0, pb: 0, ml: 0, mr: 0 }), {
+            enCita: true,
+            mlExtra: mlExtra + (est.ml || 0),
+            mrExtra: mrExtra + (est.mr || 0),
           });
+          if (pbCita > 0) salida.push(`#block(width: 100%, above: 0pt, below: 0pt, height: ${ptTypst(pbCita)}, breakable: true)`);
           anterior = 'blockquote';
           break;
         }
@@ -868,7 +909,7 @@ function construirTypst(documento, hoja, opciones) {
           est.familia = familiaCodigoDe();
           // white-space: pre-wrap; tabulador a 8 espacios
           const lineasPre = String(b.texto || '').split('\n').map((l) => [{ tipo: 'texto', valor: l.replace(/\t/g, '        ') || ' ' }]);
-          parrafo(est, null, { lineas: lineasPre, preformateado: true, familiaCodigo: est.familia });
+          emitir(est, null, { lineas: lineasPre, preformateado: true, familiaCodigo: est.familia });
           anterior = 'pre';
           break;
         }
@@ -883,7 +924,7 @@ function construirTypst(documento, hoja, opciones) {
             c.push(declDivisor);
             const est = computar(padre, ...c);
             est.sangria = 0;
-            parrafo(est, [{ tipo: 'texto', valor: divisor.texto }], {});
+            emitir(est, [{ tipo: 'texto', valor: divisor.texto }], {});
             anterior = 'p';
           } else if (divisor.tipo === 'linea') {
             // <hr>: línea de 0,5pt arriba, con los márgenes por defecto del navegador (0.5em)
@@ -900,24 +941,24 @@ function construirTypst(documento, hoja, opciones) {
         case 'figure': {
           const est = computar(padre, declFigura);
           const f = fuenteDe(est);
-          const ctxImg = { anchoDisponible: geo.anchoCont - lu(ptApx(est.ml || 0)) - lu(ptApx(est.mr || 0)) };
+          const ctxImg = { anchoDisponible: geo.anchoColumna - lu(ptApx(est.ml || 0)) - lu(ptApx(est.mr || 0)) };
           const exp = imagen(b.ruta, b.alt, ctxImg);
           if (exp) {
             // <figure> con la imagen en línea dentro de una línea de texto: la
             // imagen se apoya en la línea base; aquí se simplifica apoyándola
             // en el fondo de la caja.
-            parrafo(est, [{ tipo: 'image', ruta: b.ruta, alt: b.alt }], {});
+            emitir(est, [{ tipo: 'image', ruta: b.ruta, alt: b.alt }], {});
           }
           if (b.alt) {
             const estPie = computar(est, declPieFigura);
-            parrafo(estPie, [{ tipo: 'texto', valor: b.alt }], {});
+            emitir(estPie, [{ tipo: 'texto', valor: b.alt }], {});
           }
           anterior = 'figure';
           break;
         }
 
         case 'list':
-          emitirLista(b, padre, 0);
+          emitirLista(b, padre, 0, mlExtra);
           anterior = b.ordenada ? 'ol' : 'ul';
           break;
 
@@ -932,7 +973,7 @@ function construirTypst(documento, hoja, opciones) {
             if (anterior === 'p') c.push(declPTrasP);
             c.push(declComentario);
             const est = computar(padre, ...c);
-            parrafo(est, [{ tipo: 'texto', valor: b.texto }], {});
+            emitir(est, [{ tipo: 'texto', valor: b.texto }], {});
             anterior = 'p';
           }
           break;
@@ -944,24 +985,9 @@ function construirTypst(documento, hoja, opciones) {
     }
   }
 
-  /** Contenedor con relleno (blockquote): un block con inset que envuelve a los hijos. */
-  function emitirContenedor(est, dentro) {
-    const pt = lu(ptApx(est.pt || 0));
-    const pb = lu(ptApx(est.pb || 0));
-    const ml = lu(ptApx(est.ml || 0));
-    const mr = lu(ptApx(est.mr || 0));
-    const antes = salida.length;
-    salida.push(''); // hueco para la apertura
-    dentro();
-    const hijos = salida.splice(antes + 1);
-    salida[antes] =
-      `#block(width: 100%, above: 0pt, below: 0pt, breakable: true, inset: (top: ${ptTypst(pt)}, bottom: ${ptTypst(pb)}, left: ${ptTypst(ml)}, right: ${ptTypst(mr)}))[\n` +
-      hijos.join('\n') +
-      '\n]';
-  }
-
   /** Listas: marca en una caja en línea y sangría francesa, como el CSS. */
-  function emitirLista(lista, padre, nivel) {
+  function emitirLista(lista, padre, nivel, mlExtra) {
+    mlExtra = mlExtra || 0;
     const ordenada = !!lista.ordenada;
     const { izquierda, colgante } = E.sangriaNivel(hoja, base, ordenada, nivel);
     const formato = E.formatoNivel(hoja, ordenada, nivel);
@@ -971,6 +997,7 @@ function construirTypst(documento, hoja, opciones) {
     let anteriorLi = null;
     lista.items.forEach((item) => {
       contador++;
+      pilaContadores[nivel] = contador; // para los «%*» de niveles anidados
       const bloquesItem = item.bloques || [];
       const marcaTexto = ordenada ? marcadorOrdenado(formato, nivel, contador) : String(formato);
       let primerParrafo = true;
@@ -978,17 +1005,20 @@ function construirTypst(documento, hoja, opciones) {
         if (sub.tipo === 'paragraph' && primerParrafo) {
           const c = [declLi];
           const est = computar(padre, ...c);
-          est.ml = (nivel + 1) * liMl + izquierda;
+          est.ml = (nivel + 1) * liMl + izquierda + mlExtra;
           est.sangria = 0;
           parrafo(est, sub.hijos, { marcador: { texto: marcaTexto }, colgante: lu(ptApx(colgante)) });
           primerParrafo = false;
         } else if (sub.tipo === 'list') {
           const estLi = computar(padre, declLi);
-          emitirLista(sub, Object.assign({}, estLi, { pt: 0, pb: 0 }), Math.min(nivel + 1, 8));
+          emitirLista(sub, Object.assign({}, estLi, { pt: 0, pb: 0 }), Math.min(nivel + 1, 8), mlExtra);
         } else {
           const estLi = computar(padre, declLi);
-          estLi.ml = (nivel + 1) * liMl + izquierda;
-          emitirBloques([sub], Object.assign({}, estLi, { pt: 0, pb: 0, sangria: 0 }), { enLi: true });
+          estLi.ml = 0;
+          emitirBloques([sub], Object.assign({}, estLi, { pt: 0, pb: 0, sangria: 0 }), {
+            enLi: true,
+            mlExtra: (nivel + 1) * liMl + izquierda + mlExtra,
+          });
         }
       });
       anteriorLi = item;
@@ -997,12 +1027,13 @@ function construirTypst(documento, hoja, opciones) {
 
   /** «%1.» con contadores → texto de la marca de este elemento. */
   function marcadorOrdenado(formato, nivel, n) {
-    // Solo se conoce el contador del propio nivel; los de niveles
-    // superiores se resuelven con la pila de contadores.
+    // El contador del propio nivel es «n»; los de los niveles de arriba
+    // se leen de la pila (para formatos anidados con «%*»). Cada nivel
+    // se escribe con su «enumeration-style».
     return String(formato).replace(/%(\d)/g, (m, d) => {
       const idx = Number(d) - 1;
-      if (idx === nivel) return String(n);
-      return String(pilaContadores[idx] || 1);
+      const valor = idx === nivel ? n : pilaContadores[idx] || 1;
+      return E.formatearNumero(valor, E.estiloNivel(hoja, true, idx));
     });
   }
   const pilaContadores = [];
@@ -1019,7 +1050,7 @@ function construirTypst(documento, hoja, opciones) {
     const celda = (nodos, negrita, alineacion) => {
       const est = Object.assign({}, padre, { negrita: negrita || padre.negrita });
       const tramos = [];
-      const ctx = { lh, tramos, familiaCodigo: familiaCodigoDe(), anchoDisponible: geo.anchoCont / columnas };
+      const ctx = { lh, tramos, familiaCodigo: familiaCodigoDe(), anchoDisponible: geo.anchoColumna / columnas };
       const c = inline(nodos, est, ctx);
       return `table.cell(align: ${alineacion || 'left'}, [#set text(top-edge: ${ptTypst(caja.ascL)}, bottom-edge: ${ptTypst(-caja.descL)}); #(${c})])`;
     };
@@ -1093,7 +1124,9 @@ function construirTypst(documento, hoja, opciones) {
     `#set page(width: ${fmt(geo.anchoPt)}pt, height: ${fmt(geo.altoPt)}pt, ` +
     `margin: (left: ${fmt(geo.margenes.izquierda)}pt, top: ${fmt(geo.margenes.superior)}pt, ` +
     `right: ${fmt(geo.margenes.derecha)}pt, bottom: ${fmt(geo.margenes.inferior)}pt), ` +
-    `header: none, footer: none, foreground: ${piePagina()})`;
+    (geo.columnas > 1 ? `columns: ${geo.columnas}, ` : '') +
+    `header: none, footer: none, foreground: ${piePagina()})` +
+    (geo.columnas > 1 ? `\n#set columns(gutter: ${ptTypst(geo.huecoPx)})` : '');
 
   const fRaiz = fuenteDe(raiz);
   const cabecera = [
