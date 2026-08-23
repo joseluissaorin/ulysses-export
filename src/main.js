@@ -254,7 +254,7 @@ class UlyssesExport extends Plugin {
   }
 
   async listarEstilos() {
-    const encontradas = [];
+    let encontradas = [];
     const vistas = new Set();
 
     for (const carpeta of this.carpetasDeEstilos()) {
@@ -287,6 +287,20 @@ class UlyssesExport extends Plugin {
         encontradas.push({ ruta: dentro, nombre: await this.nombreDePaquete(sub), paquete: true });
       }
     }
+
+    // Un mismo estilo puede estar en la carpeta del plugin y en la del
+    // vault (que es la que se sincroniza con el móvil). Se muestra una
+    // sola vez, y manda la del vault: es la que el usuario edita y la
+    // única que viaja al teléfono.
+    const porNombre = new Map();
+    for (const h of encontradas) {
+      const previa = porNombre.get(h.nombre);
+      const esDelPlugin = h.ruta.startsWith(`${this.manifest.dir}/`);
+      if (!previa || (previa.ruta.startsWith(`${this.manifest.dir}/`) && !esDelPlugin)) {
+        porNombre.set(h.nombre, h);
+      }
+    }
+    encontradas = Array.from(porNombre.values());
 
     encontradas.sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
 

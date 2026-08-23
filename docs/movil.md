@@ -48,6 +48,22 @@ después el plugin ya no necesita internet nunca más.
 
 La descarga del motor se comprueba con su huella SHA-256 antes de usarlo.
 
+## Los estilos `.ulss` tienen que estar en el vault
+
+El plugin trae sus estilos dentro de su propia carpeta
+(`.obsidian/plugins/ulysses-export/estilos`), pero **esa carpeta no viaja
+al móvil** ni con Obsidian Sync (que por defecto no sincroniza los
+plugins) ni con iCloud. Para tener tus estilos en el teléfono:
+
+1. En el ordenador, crea una carpeta normal en el vault —por ejemplo
+   `Estilos Ulysses`— y copia ahí tus archivos `.ulss`.
+2. En los ajustes del plugin, escribe esa carpeta en **«Carpeta de
+   estilos adicional»**.
+
+Al ser una carpeta normal del vault, se sincroniza como cualquier nota. Si
+un estilo está en las dos carpetas, manda el del vault y aparece una sola
+vez en la lista.
+
 ## Tipografías: lo importante en el móvil
 
 En el escritorio el plugin usa las tipografías instaladas en el sistema.
