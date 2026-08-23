@@ -32,9 +32,21 @@ justification distribution. On reference documents of 400+ lines the
 maximum measured deviation is **0.02 pt**. The model is documented in
 [`docs/paridad-chromium.md`](docs/paridad-chromium.md) (Spanish).
 
-Fonts: system fonts on desktop (indexed once, cached); on mobile, drop
-your `.ttf`/`.otf`/`.ttc` files into a vault folder (default
-`Tipografías`).
+Fonts: system fonts on desktop (indexed once, cached). On mobile neither
+iOS nor Android lets an app read system font files, so the plugin
+downloads a fallback set (Tinos, Arimo, Cousine — metric-compatible with
+Times New Roman, Arial and Courier New); for output identical to the
+desktop, copy your own `.ttf`/`.otf`/`.ttc` files into a vault folder
+(default `Tipografías`).
+
+## Mobile (iOS / Android)
+
+Same engine, same output. The first export downloads the compiler
+(~21 MB, checked against its SHA-256) and the fallback fonts (~4 MB); the
+command **«Preparar para usar sin conexión»** fetches both up front so the
+plugin never needs the network again. Full instructions (BRAT or manual
+install, fonts, performance, limits) in
+**[`docs/movil.md`](docs/movil.md)** (Spanish).
 
 ## Install
 

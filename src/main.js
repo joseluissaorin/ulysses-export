@@ -136,6 +136,23 @@ class UlyssesExport extends Plugin {
     });
 
     this.addCommand({
+      id: 'preparar-sin-conexion',
+      name: 'Preparar para usar sin conexión (motor y tipografías)',
+      callback: async () => {
+        const aviso = new Notice('Preparando…', 0);
+        try {
+          const pasos = await MOTOR.prepararSinConexion(this.entornoMotor(), (m) => new Notice(m));
+          new Notice('Listo: ' + pasos.join('; '), 8000);
+        } catch (e) {
+          console.error('[Ulysses Export]', e);
+          new Notice(`No se pudo preparar: ${e && e.message ? e.message : e}`, 8000);
+        } finally {
+          aviso.hide();
+        }
+      },
+    });
+
+    this.addCommand({
       id: 'recargar-estilos',
       name: 'Recargar las hojas de estilo',
       callback: async () => {
@@ -527,6 +544,16 @@ class UlyssesExport extends Plugin {
       },
       guardarCacheIndice: async (texto) => {
         try { await adapter.write(rutaIndice, texto); } catch (e) { /* no pasa nada */ }
+      },
+      // Las tipografías de reserva viven en «<plugin>/fuentes», que es la
+      // primera carpeta que mira «listarFuentes».
+      existeFuente: async (nombre) => {
+        try { return await adapter.exists(`${dir}/fuentes/${nombre}`); } catch (e) { return false; }
+      },
+      guardarFuente: async (nombre, bytes) => {
+        if (!(await adapter.exists(`${dir}/fuentes`))) await adapter.mkdir(`${dir}/fuentes`);
+        const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+        await adapter.writeBinary(`${dir}/fuentes/${nombre}`, ab);
       },
       crearCompilador: async (wasmBytes, fuentes) => {
         const glue = require('@myriaddreamin/typst-ts-web-compiler/pkg/typst_ts_web_compiler.mjs');

@@ -127,10 +127,13 @@ function geometria(pagina, opciones) {
 
 /** Familias genéricas de CSS → lo que fontconfig suele dar en cada sistema. */
 const GENERICAS = {
-  serif: ['Times New Roman', 'Liberation Serif', 'DejaVu Serif', 'Nimbus Roman', 'Tinos', 'Noto Serif', 'Georgia'],
-  'sans-serif': ['Arial', 'Helvetica', 'Liberation Sans', 'DejaVu Sans', 'Nimbus Sans', 'Arimo', 'Noto Sans'],
-  monospace: ['Courier New', 'Liberation Mono', 'DejaVu Sans Mono', 'Nimbus Mono PS', 'Cousine', 'Noto Sans Mono'],
+  serif: ['Times New Roman', 'Times', 'Liberation Serif', 'DejaVu Serif', 'Nimbus Roman', 'Tinos', 'Noto Serif', 'Georgia'],
+  'sans-serif': ['Arial', 'Helvetica', 'Helvetica Neue', 'Liberation Sans', 'DejaVu Sans', 'Nimbus Sans', 'Arimo', 'Noto Sans'],
+  monospace: ['Courier New', 'Menlo', 'Monaco', 'Consolas', 'Liberation Mono', 'DejaVu Sans Mono', 'Nimbus Mono PS', 'Cousine', 'Noto Sans Mono'],
 };
+// Tinos, Arimo y Cousine (el juego de reserva que el plugin se descarga
+// en el móvil) ya están en las listas: son métricamente compatibles con
+// Times New Roman, Arial y Courier New respectivamente.
 
 /** Separa una pila CSS («"Avenir Next", Avenir, serif») en nombres. */
 function familiasDePila(pila) {
@@ -1609,6 +1612,7 @@ function calcularAjuste(bloques, posiciones, geo, previo) {
 
 module.exports = {
   construirTypst,
+  GENERICAS,
   calcularAjuste,
   geometria,
   metricasBlink,

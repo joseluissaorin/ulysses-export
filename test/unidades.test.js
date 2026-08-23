@@ -130,3 +130,38 @@ test('lectura de fuentes: cara sintética', () => {
   // TTF mínimo de mentira: solo comprobamos que un fichero no reconocido lanza
   assert.throws(() => METRICAS.leerFuente(new Uint8Array([1, 2, 3, 4])));
 });
+
+test('verificación del compilador descargado', async () => {
+  const MOTOR = require('../src/motor.js');
+  // Ni siquiera es WebAssembly
+  await assert.rejects(() => MOTOR.verificarCompilador(new Uint8Array([1, 2, 3, 4, 5])), /WebAssembly/);
+  // Firma correcta pero tamaño que no cuadra
+  const falso = new Uint8Array(1000);
+  falso.set([0x00, 0x61, 0x73, 0x6d], 0);
+  await assert.rejects(() => MOTOR.verificarCompilador(falso), /tamaño/);
+  assert.match(MOTOR.SHA256_COMPILADOR, /^[0-9a-f]{64}$/);
+});
+
+test('tipografías de reserva: juego completo y coherente', () => {
+  const MOTOR = require('../src/motor.js');
+  assert.strictEqual(MOTOR.FUENTES_RESERVA.length, 12); // 3 familias × 4 variantes
+  for (const f of MOTOR.FUENTES_RESERVA) {
+    assert.match(f.nombre, /\.ttf$/);
+    assert.match(f.url, /^https:\/\//);
+  }
+  // Las tres familias de reserva tienen que estar en las genéricas del
+  // emisor, o «resolverFamilia» nunca las encontraría.
+  const TYPST = require('../src/typst.js');
+  const todas = Object.values(TYPST.GENERICAS).flat();
+  for (const familia of ['Tinos', 'Arimo', 'Cousine']) assert.ok(todas.includes(familia), familia);
+});
+
+test('faltanGeneros detecta un catálogo incompleto', () => {
+  const MOTOR = require('../src/motor.js');
+  const vacio = { tieneFamilia: () => false };
+  assert.strictEqual(MOTOR.faltanGeneros(vacio), true);
+  const completo = { tieneFamilia: (f) => ['Tinos', 'Arimo', 'Cousine'].includes(f) };
+  assert.strictEqual(MOTOR.faltanGeneros(completo), false);
+  const soloSerif = { tieneFamilia: (f) => f === 'Tinos' };
+  assert.strictEqual(MOTOR.faltanGeneros(soloSerif), true);
+});

@@ -23,11 +23,51 @@
 const { CatalogoFuentes, leerFuente, normalizar } = require('./metricas.js');
 const TYPST = require('./typst.js');
 
+/**
+ * Juego de tipografías de reserva (Croscore, Apache-2.0): métricamente
+ * compatibles con Times New Roman, Arial/Helvetica y Courier New, que es
+ * justo lo que fontconfig le da a Chromium en Linux. Sirven para que el
+ * PDF salga bien en un móvil recién instalado, donde no hay tipografías
+ * del sistema a las que el plugin pueda acceder.
+ */
+const FUENTES_RESERVA = [];
+for (const [familia, paquete] of [['Tinos', 'tinos'], ['Arimo', 'arimo'], ['Cousine', 'cousine']]) {
+  for (const variante of ['400Regular', '700Bold', '400Regular_Italic', '700Bold_Italic']) {
+    FUENTES_RESERVA.push({
+      nombre: `${familia}_${variante}.ttf`,
+      url: `https://cdn.jsdelivr.net/npm/@expo-google-fonts/${paquete}/${familia}_${variante}.ttf`,
+    });
+  }
+}
+
 /** De dónde se baja el compilador si no está en la carpeta del plugin. */
 const VERSION_COMPILADOR = '0.6.0';
 const URL_COMPILADOR =
   `https://cdn.jsdelivr.net/npm/@myriaddreamin/typst-ts-web-compiler@${VERSION_COMPILADOR}/pkg/typst_ts_web_compiler_bg.wasm`;
 const FICHERO_COMPILADOR = 'typst.wasm';
+/** Huella del artefacto publicado en npm: se comprueba tras descargarlo. */
+const SHA256_COMPILADOR = '52995fcbcda9287b97b27996fe9b91057e4ca87fadb41b36d100bc45d33d9454';
+const TAMANO_COMPILADOR = 21493376;
+
+/**
+ * Comprueba que lo descargado es de verdad el compilador esperado: la
+ * firma de WebAssembly, el tamaño y —si el entorno ofrece SubtleCrypto—
+ * la huella SHA-256. Descargar 21 MB a ciegas y ejecutarlos no.
+ */
+async function verificarCompilador(bytes) {
+  const firma = bytes.length > 4 && bytes[0] === 0x00 && bytes[1] === 0x61 && bytes[2] === 0x73 && bytes[3] === 0x6d;
+  if (!firma) throw new Error('el motor descargado no es un módulo WebAssembly válido');
+  if (bytes.length !== TAMANO_COMPILADOR) {
+    throw new Error(`el motor descargado no tiene el tamaño esperado (${bytes.length} en vez de ${TAMANO_COMPILADOR})`);
+  }
+  const subtle = typeof crypto !== 'undefined' && crypto.subtle;
+  if (!subtle) return; // sin SubtleCrypto nos quedamos con firma y tamaño
+  const resumen = await subtle.digest('SHA-256', bytes);
+  const hex = Array.from(new Uint8Array(resumen)).map((b) => b.toString(16).padStart(2, '0')).join('');
+  if (hex !== SHA256_COMPILADOR) {
+    throw new Error('la huella del motor descargado no coincide con la esperada');
+  }
+}
 
 /** Carpetas de fuentes del sistema en cada plataforma (solo escritorio). */
 function carpetasDelSistema(plataforma, home) {
@@ -112,8 +152,46 @@ function familiasQuePideLaHoja(hoja, D, E) {
   const familias = [];
   for (const pila of pilas) familias.push(...TYPST.familiasDePila(pila));
   // Genéricas de reserva por si alguna pila cae hasta el final
-  familias.push('Times New Roman', 'Liberation Serif', 'DejaVu Serif', 'Liberation Sans', 'DejaVu Sans', 'Liberation Mono', 'DejaVu Sans Mono', 'Arial', 'Helvetica', 'Courier New', 'Georgia', 'Noto Serif', 'Noto Sans');
+  for (const lista of Object.values(TYPST.GENERICAS)) familias.push(...lista);
   return familias;
+}
+
+/**
+ * ¿Hay al menos una tipografía utilizable para cada género (serif, sans
+ * y monoespaciada)? Si no, el PDF saldría con huecos —o mudo del todo—,
+ * y conviene traerse el juego de reserva.
+ */
+function faltanGeneros(catalogo) {
+  for (const familias of Object.values(TYPST.GENERICAS)) {
+    if (!familias.some((f) => catalogo.tieneFamilia(f))) return true;
+  }
+  return false;
+}
+
+/**
+ * Descarga el juego de reserva a «<plugin>/fuentes» (una sola vez) y lo
+ * añade al catálogo. Devuelve los ficheros nuevos.
+ */
+async function traerFuentesDeReserva(entorno, catalogo, avisar) {
+  if (avisar) avisar(`Descargando tipografías de reserva (${FUENTES_RESERVA.length} ficheros, ~4 MB)…`);
+  const nuevas = [];
+  for (const f of FUENTES_RESERVA) {
+    try {
+      const datos = await entorno.descargar(f.url);
+      await entorno.guardarFuente(f.nombre, datos);
+      catalogo.anadir(datos, f.nombre);
+      nuevas.push(datos);
+    } catch (e) {
+      console.error('[Ulysses Export] no se pudo descargar', f.nombre, e);
+    }
+  }
+  if (!nuevas.length) {
+    throw new Error(
+      'No hay ninguna tipografía disponible y no se han podido descargar las de reserva. ' +
+        'Copia archivos .ttf/.otf/.ttc a la carpeta de tipografías del vault y vuelve a intentarlo.'
+    );
+  }
+  return nuevas;
 }
 
 /**
@@ -137,6 +215,7 @@ async function prepararMotor(entorno, hoja, D, E, avisar) {
   if (!wasm) {
     if (avisar) avisar('Descargando el motor de PDF (una sola vez, ~21 MB)…');
     wasm = await entorno.descargar(URL_COMPILADOR);
+    await verificarCompilador(wasm);
     await entorno.guardarWasm(wasm);
   }
 
@@ -175,8 +254,45 @@ async function prepararMotor(entorno, hoja, D, E, avisar) {
     }
   }
 
+  // 4. Sin tipografías no hay PDF que valga: se traen las de reserva.
+  if (!catalogo.caras.length || faltanGeneros(catalogo)) {
+    const nuevas = await traerFuentesDeReserva(entorno, catalogo, avisar);
+    fuentes.push(...nuevas);
+    // El índice se rehace en la próxima exportación, con las ya guardadas.
+    await entorno.guardarCacheIndice(indice.aCache());
+  }
+
   const compilador = await entorno.crearCompilador(wasm, fuentes);
   return { compilador, catalogo };
+}
+
+/**
+ * Deja todo listo para trabajar sin conexión: el compilador y el juego
+ * de tipografías de reserva. Útil antes de salir de casa con el móvil.
+ */
+async function prepararSinConexion(entorno, avisar) {
+  const pasos = [];
+  let wasm = await entorno.leerWasm();
+  if (!wasm) {
+    if (avisar) avisar('Descargando el motor de PDF (~21 MB)…');
+    wasm = await entorno.descargar(URL_COMPILADOR);
+    await verificarCompilador(wasm);
+    await entorno.guardarWasm(wasm);
+    pasos.push('motor de PDF descargado');
+  } else {
+    pasos.push('el motor de PDF ya estaba');
+  }
+  const catalogo = new CatalogoFuentes();
+  let faltan = 0;
+  for (const f of FUENTES_RESERVA) {
+    if (await entorno.existeFuente(f.nombre)) continue;
+    faltan++;
+    const datos = await entorno.descargar(f.url);
+    await entorno.guardarFuente(f.nombre, datos);
+    catalogo.anadir(datos, f.nombre);
+  }
+  pasos.push(faltan ? `${faltan} tipografías de reserva descargadas` : 'las tipografías de reserva ya estaban');
+  return pasos;
 }
 
 /**
@@ -316,6 +432,12 @@ function posicionesDeBloques(compilador) {
 
 module.exports = {
   prepararMotor,
+  verificarCompilador,
+  SHA256_COMPILADOR,
+  prepararSinConexion,
+  traerFuentesDeReserva,
+  faltanGeneros,
+  FUENTES_RESERVA,
   compilarPdf,
   posicionesDeBloques,
   IndiceFuentes,

@@ -44,10 +44,25 @@ de página) están documentados en [`docs/paridad-chromium.md`](docs/paridad-chr
 - **Escritorio**: se usan las tipografías instaladas en el sistema. La
   primera vez se construye un índice (solo nombres, es rápido) que queda
   cacheado.
-- **Móvil**: pon tus fuentes (`.ttf`, `.otf`, `.ttc`) en una carpeta del
-  vault (por defecto `Tipografías`) y el plugin las usará.
+- **Móvil**: ni iOS ni Android dejan leer las tipografías del sistema, así
+  que el plugin se descarga un juego de reserva (Tinos, Arimo y Cousine,
+  métricamente compatibles con Times New Roman, Arial y Courier New). Para
+  que el PDF salga idéntico al del escritorio, copia tus fuentes
+  (`.ttf`, `.otf`, `.ttc`) a una carpeta del vault (por defecto
+  `Tipografías`).
 - Si una familia de la hoja no está disponible, se cae a la misma pila de
   alternativas que usa la exportación HTML y se te avisa.
+
+## En el móvil
+
+Funciona igual que en el escritorio, con el mismo motor y el mismo
+resultado. La primera exportación descarga el motor (~21 MB, verificado
+con su huella SHA-256) y las tipografías de reserva (~4 MB); el comando
+**«Preparar para usar sin conexión»** los baja de una vez para no
+depender de la red después.
+
+Instrucciones completas —instalación con BRAT o a mano, tipografías,
+rendimiento y límites— en **[`docs/movil.md`](docs/movil.md)**.
 
 ## Instalación
 
