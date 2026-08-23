@@ -288,6 +288,20 @@ class UlyssesExport extends Plugin {
       }
     }
 
+    // Cualquier .ulss suelto por el vault, esté en la carpeta que esté:
+    // en el móvil evita tener que configurar nada, y en el escritorio
+    // encuentra los estilos que se hayan dejado en otro sitio.
+    try {
+      for (const file of this.app.vault.getFiles()) {
+        if ((file.extension || '').toLowerCase() !== 'ulss') continue;
+        if (vistas.has(file.path)) continue;
+        vistas.add(file.path);
+        encontradas.push({ ruta: file.path, nombre: file.basename });
+      }
+    } catch (e) {
+      /* si el vault no está listo, nos quedamos con las carpetas conocidas */
+    }
+
     // Un mismo estilo puede estar en la carpeta del plugin y en la del
     // vault (que es la que se sincroniza con el móvil). Se muestra una
     // sola vez, y manda la del vault: es la que el usuario edita y la
@@ -505,12 +519,23 @@ class UlyssesExport extends Plugin {
       },
       listarFuentes: async () => {
         const candidatos = [];
-        // Carpetas dentro del vault (funcionan también en el móvil)
+        const vistas = new Set();
+        // Cualquier tipografía suelta por el vault, esté donde esté: así
+        // en el móvil basta con dejarlas en una carpeta cualquiera.
+        try {
+          for (const file of this.app.vault.getFiles()) {
+            if (!esFuente(file.name)) continue;
+            vistas.add(file.path);
+            candidatos.push({ ruta: `vault:${file.path}`, mtime: (file.stat && file.stat.mtime) || 0 });
+          }
+        } catch (e) { /* el vault aún no está listo */ }
+        // Carpetas declaradas (incluida la del plugin, que el vault no ve)
         for (const carpeta of carpetasVault) {
           try {
             const lista = await adapter.list(carpeta);
             for (const ruta of lista.files || []) {
-              if (!esFuente(ruta)) continue;
+              if (!esFuente(ruta) || vistas.has(ruta)) continue;
+              vistas.add(ruta);
               const st = await adapter.stat(ruta);
               candidatos.push({ ruta: `vault:${ruta}`, mtime: (st && st.mtime) || 0 });
             }

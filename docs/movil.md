@@ -53,16 +53,26 @@ La descarga del motor se comprueba con su huella SHA-256 antes de usarlo.
 El plugin trae sus estilos dentro de su propia carpeta
 (`.obsidian/plugins/ulysses-export/estilos`), pero **esa carpeta no viaja
 al móvil** ni con Obsidian Sync (que por defecto no sincroniza los
-plugins) ni con iCloud. Para tener tus estilos en el teléfono:
+plugins) ni con iCloud. La solución es tenerlos en una carpeta normal del
+vault:
 
-1. En el ordenador, crea una carpeta normal en el vault —por ejemplo
+1. En el ordenador, crea una carpeta cualquiera en el vault —por ejemplo
    `Estilos Ulysses`— y copia ahí tus archivos `.ulss`.
-2. En los ajustes del plugin, escribe esa carpeta en **«Carpeta de
-   estilos adicional»**.
+2. Ya está: **no hace falta configurar nada**. El plugin busca por todo el
+   vault los archivos `.ulss` y los ofrece en la lista.
 
-Al ser una carpeta normal del vault, se sincroniza como cualquier nota. Si
-un estilo está en las dos carpetas, manda el del vault y aparece una sola
-vez en la lista.
+Lo mismo vale para las tipografías: cualquier `.ttf`, `.otf` o `.ttc` que
+haya en el vault se detecta solo, esté en la carpeta que esté. (En los
+ajustes puedes declarar carpetas concretas, pero solo hace falta si las
+tienes fuera del vault.)
+
+Si un estilo está a la vez en el vault y en la carpeta del plugin, manda
+el del vault y aparece una sola vez.
+
+Con Obsidian Sync, ojo: los `.ulss` y los archivos de tipografías son
+«otros tipos de archivo», y esa categoría viene **desactivada** de fábrica
+(*Ajustes → Sync → Área de sincronización → Sincronizar todos los otros
+tipos*). Si las carpetas te llegan vacías al móvil, es eso.
 
 ## Tipografías: lo importante en el móvil
 
