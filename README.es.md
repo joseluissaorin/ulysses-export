@@ -69,7 +69,7 @@ rendimiento y límites— en **[`docs/movil.md`](docs/movil.md)**.
 Manual, mientras no esté en el catálogo de plugins de la comunidad:
 
 1. Descarga `main.js`, `manifest.json`, `styles.css` (y opcionalmente
-   `typst.wasm`) de la [última release](../../releases).
+   `typst.wasm`) de la [última release](https://github.com/joseluissaorin/ulysses-export/releases/latest).
 2. Cópialos a `TU_VAULT/.obsidian/plugins/ulysses-export/`.
 3. Activa el plugin en Ajustes → Plugins de la comunidad.
 

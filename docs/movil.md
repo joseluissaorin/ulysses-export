@@ -12,7 +12,7 @@ externo ni conexión (salvo la primera vez, para traerse el motor).
 1. Instala el plugin **Obsidian42 – BRAT** desde los plugins de la
    comunidad.
 2. En sus ajustes: *Add Beta plugin* → pega la dirección del repositorio
-   (`https://github.com/USUARIO/ulysses-export`).
+   (`https://github.com/joseluissaorin/ulysses-export`).
 3. Activa **Ulysses Export** en Ajustes → Plugins de la comunidad.
 
 BRAT también te avisará de las actualizaciones.

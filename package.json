@@ -18,5 +18,10 @@
   "dependencies": {
     "@myriaddreamin/typst.ts": "^0.6.0",
     "@myriaddreamin/typst-ts-web-compiler": "^0.6.0"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/joseluissaorin/ulysses-export.git"
+  },
+  "homepage": "https://github.com/joseluissaorin/ulysses-export"
 }

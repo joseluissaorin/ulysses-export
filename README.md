@@ -52,7 +52,7 @@ install, fonts, performance, limits) in
 
 Manual, until it lands in the community catalog: copy `main.js`,
 `manifest.json`, `styles.css` (and optionally `typst.wasm`) from the
-[latest release](../../releases) into
+[latest release](https://github.com/joseluissaorin/ulysses-export/releases/latest) into
 `YOUR_VAULT/.obsidian/plugins/ulysses-export/`, then enable it.
 
 ## Examples
