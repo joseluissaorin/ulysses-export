@@ -30,7 +30,18 @@ def lineas(pagina):
             fuente = spans[0]['font']
             out.append(dict(y=y, x0=x0, x1=x1, texto=texto, tam=tam, fuente=fuente))
     out.sort(key=lambda r: (round(r['y'], 1), r['x0']))
-    return out
+    # PyMuPDF parte una línea en varios registros cuando hay un hueco
+    # grande (marca de lista → texto). Se fusionan los registros a la
+    # misma altura separados por menos de 60 pt.
+    unidas = []
+    for r in out:
+        u = unidas[-1] if unidas else None
+        if u and abs(u['y'] - r['y']) <= 0.03 and 0 <= r['x0'] - u['x1'] < 60:
+            u['texto'] = (u['texto'] + ' ' + r['texto']).strip()
+            u['x1'] = max(u['x1'], r['x1'])
+        else:
+            unidas.append(dict(r))
+    return unidas
 
 def main():
     ap = argparse.ArgumentParser()

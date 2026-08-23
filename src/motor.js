@@ -37,7 +37,12 @@ function carpetasDelSistema(plataforma, home) {
     case 'win32':
       return ['C:\\Windows\\Fonts', `${process.env.LOCALAPPDATA || ''}\\Microsoft\\Windows\\Fonts`];
     default:
-      return ['/usr/share/fonts', '/usr/local/share/fonts', `${home}/.local/share/fonts`, `${home}/.fonts`];
+      // Dentro de un sandbox de Flatpak (p. ej. Obsidian de Flathub) las
+      // fuentes del anfitrión aparecen montadas bajo /run/host.
+      return [
+        '/usr/share/fonts', '/usr/local/share/fonts', `${home}/.local/share/fonts`, `${home}/.fonts`,
+        '/run/host/fonts', '/run/host/local-fonts', '/run/host/user-fonts',
+      ];
   }
 }
 
@@ -191,19 +196,94 @@ function compilarPdf(compilador, documento, hoja, opciones) {
     return r;
   };
 
-  const primera = TYPST.construirTypst(documento, hoja, opciones);
+  let primera = TYPST.construirTypst(documento, hoja, opciones);
   if (primera.geo.columnas > 1) {
-    // Con varias columnas el ajuste a píxel razona mal (mezcla columnas):
-    // la primera pasada ya queda a menos de medio píxel de Chromium.
+    // Multicolumna: Chromium EQUILIBRA las columnas (column-fill: balance).
+    // Se mide el contenido en una galería a ancho de columna y se busca la
+    // altura mínima que reparte el contenido en las columnas disponibles;
+    // esa altura se impone como área de la página. El ajuste fino a píxel
+    // se omite (queda a menos de medio píxel).
+    const galeria = TYPST.construirTypst(documento, hoja, Object.assign({ galeria: true }, opciones));
+    compilar(galeria.fuente, galeria.recursos);
+    const posiciones = posicionesDeBloques(compilador);
+    const alturaPx = alturaEquilibrada(galeria, posiciones, primera.geo.columnas);
+    if (alturaPx) {
+      primera = TYPST.construirTypst(documento, hoja, Object.assign({ alturaColumnasPx: alturaPx }, opciones));
+    }
     const pdf = compilar(primera.fuente, primera.recursos);
     return { pdf, avisos: primera.avisos };
   }
   compilar(primera.fuente, primera.recursos);
-  const posiciones = posicionesDeBloques(compilador);
-  const ajuste = TYPST.calcularAjuste(primera.bloques, posiciones, primera.geo);
+  let posiciones = posicionesDeBloques(compilador);
+  let ajuste = TYPST.calcularAjuste(primera.bloques, posiciones, primera.geo);
+
+  // Si algún párrafo lleva superíndice en su primera línea, la caja de
+  // relleno crece y el flujo cambia: se vuelve a medir con las cajas ya
+  // crecidas (que es el flujo real de Chromium) antes del ajuste fino.
+  const soloSups = {};
+  for (const [k, a] of Object.entries(ajuste)) {
+    if (a.supEnPrimera) soloSups[k] = { supEnPrimera: true };
+  }
+  if (Object.keys(soloSups).length) {
+    const media = TYPST.construirTypst(documento, hoja, Object.assign({ ajuste: soloSups }, opciones));
+    compilar(media.fuente, media.recursos);
+    posiciones = posicionesDeBloques(compilador);
+    ajuste = TYPST.calcularAjuste(media.bloques, posiciones, media.geo, soloSups);
+  }
+
   const segunda = TYPST.construirTypst(documento, hoja, Object.assign({ ajuste }, opciones));
   const pdf = compilar(segunda.fuente, segunda.recursos);
-  return { pdf, avisos: segunda.avisos };
+  return { pdf, avisos: segunda.avisos, fuente: segunda.fuente };
+}
+
+/**
+ * Altura de columna equilibrada al estilo de Chromium: la mínima que
+ * reparte todas las líneas en las columnas disponibles. Los cortes
+ * posibles son los finales de línea de la galería.
+ */
+function alturaEquilibrada(galeria, posiciones, columnas) {
+  const PX = TYPST.PX;
+  const superior = galeria.geo.margenes.superior;
+  const limites = [];
+  for (const b of galeria.bloques) {
+    const p = posiciones[b.k];
+    if (!p || p.yIni === undefined || p.yFin === undefined) continue;
+    const primera = (p.yIni - superior) / PX;
+    const ultima = (p.yFin - superior) / PX;
+    const n = b.lh > 0 ? Math.max(1, Math.round((ultima - primera) / b.lh) + 1) : 1;
+    for (let j = 0; j < n; j++) limites.push(primera + j * b.lh + b.descL);
+    if (b.pb) limites.push(ultima + b.descL + b.pb);
+  }
+  if (!limites.length) return null;
+  limites.sort((a, b) => a - b);
+  const total = limites[limites.length - 1];
+
+  // Reparto voraz: cada trozo va a la columna actual si cabe; si no, abre
+  // columna nueva en el límite anterior. Devuelve cuántas columnas usa.
+  const columnasUsadas = (h) => {
+    let usadas = 1;
+    let inicio = 0;
+    let previo = 0;
+    for (const corte of limites) {
+      if (corte - inicio > h + 1e-6) {
+        usadas++;
+        inicio = previo;
+        if (corte - inicio > h + 1e-6) return Infinity; // un trozo mayor que la columna
+      }
+      previo = corte;
+    }
+    return usadas;
+  };
+
+  // La mínima altura que reparte el contenido en ≤ N columnas, empezando
+  // por el reparto ideal y estirando hasta el siguiente final de línea.
+  const objetivo = total / columnas;
+  for (const corte of limites) {
+    if (corte + 1e-6 >= objetivo && columnasUsadas(corte) <= columnas) {
+      return corte + 0.5;
+    }
+  }
+  return total + 0.5;
 }
 
 /**
@@ -224,6 +304,8 @@ function posicionesDeBloques(compilador) {
     if (v.q === 'i') {
       p.pagina = v.p;
       p.yIni = pt(v.y);
+    } else if (v.q === 's') {
+      (p.sups = p.sups || []).push({ pagina: v.p, y: pt(v.y) });
     } else {
       p.paginaFin = v.p;
       p.yFin = pt(v.y);

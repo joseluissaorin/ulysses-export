@@ -64,6 +64,7 @@ if (opc.unaPasada) {
   const r = MOTOR.compilarPdf(compilador, documento, hoja, opciones);
   pdf = r.pdf;
   avisos = r.avisos;
+  if (opc.typ && r.fuente) writeFileSync(opc.typ, r.fuente);
 }
 writeFileSync(salida, pdf);
 for (const a of avisos) console.warn('aviso:', a);

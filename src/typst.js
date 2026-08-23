@@ -56,7 +56,8 @@ const ptTypst = (px) => `${fmt(px * PX)}pt`;
  * Geometria de pagina
  * ------------------------------------------------------------------ */
 
-function geometria(pagina) {
+function geometria(pagina, opciones) {
+  const opc = opciones || {};
   // Skia trabaja a 300 ppp y trunca el tamaño de página a unidades enteras.
   const dispositivo = (pt) => Math.floor(pt * 300 / 72 + 1e-6) * 72 / 300;
   const anchoPt = dispositivo(pagina.ancho);
@@ -69,9 +70,11 @@ function geometria(pagina) {
   const pagPxW = pagina.ancho * (4 / 3);
   const pagPxH = pagina.alto * (4 / 3);
 
-  // Bloque contenedor inicial: página entera menos márgenes, en enteros.
-  const anchoCont = Math.floor(pagPxW + 1e-6) - Math.floor(mlPx + 1e-6) - Math.floor(mrPx + 1e-6);
-  const altoCont = Math.floor(pagPxH + 1e-6) - Math.floor(mtPx + 1e-6) - Math.floor(mbPx + 1e-6);
+  // Bloque contenedor inicial: el hueco fraccionario entre márgenes,
+  // truncado a entero MÁS UNO (medido en A4 y Carta contra Chromium; en
+  // A4 coincide con floor(página)−floor(márgenes), en Carta gana 1 px).
+  const anchoCont = Math.floor(pagPxW - mlPx - mrPx + 1e-6) + 1;
+  const altoCont = Math.floor(pagPxH - mtPx - mbPx + 1e-6) + 1;
   // Origen del contenido en la página (medido: izquierda ceil, arriba round).
   const ox = Math.ceil(mlPx - 1e-6);
   const oy = Math.round(mtPx);
@@ -81,18 +84,41 @@ function geometria(pagina) {
   const derecha = anchoPt - izquierda - anchoCont * PX;
   const inferior = altoPt - superior - altoCont * PX;
 
-  const columnas = Math.max(1, pagina.columnas || 1);
+  let columnas = Math.max(1, pagina.columnas || 1);
   // Ancho de cada columna, como lo calcula CSS: (ancho - huecos) / n
   const huecoPx = lu(ptApx(pagina.separacionColumnas || 0));
   const anchoColumna = columnas > 1 ? lu((anchoCont - huecoPx * (columnas - 1)) / columnas) : anchoCont;
 
-  return {
+  const geo = {
     anchoPt, altoPt, anchoCont, altoCont, ox, oy, columnas, huecoPx, anchoColumna,
     margenes: { izquierda, superior, derecha, inferior },
     mlPx, mrPx, mtPx, mbPx, pagPxW, pagPxH,
     // Altura de página tal como la ve la caja de margen (sin factor S)
     altoPaginaPx: altoPt / PX_PAGINA,
   };
+
+  if (opc.galeria) {
+    // Pasada de medición: una sola columna a su ancho real, en una página
+    // altísima, para conocer la altura del contenido antes de equilibrar.
+    geo.columnas = 1;
+    geo.anchoCont = anchoColumna;
+    geo.anchoColumna = anchoColumna;
+    geo.altoPt = 10000;
+    geo.altoCont = Math.floor((10000 - superior - 20) / PX);
+    geo.margenes = Object.assign({}, geo.margenes, {
+      derecha: 20,
+      inferior: 10000 - superior - geo.altoCont * PX,
+    });
+    geo.anchoPt = izquierda + anchoColumna * PX + 20;
+    geo.esGaleria = true;
+  } else if (opc.alturaColumnasPx && columnas > 1) {
+    // Altura de columna equilibrada, como el multicolumna de Chromium.
+    geo.altoCont = Math.min(geo.altoCont, Math.ceil(opc.alturaColumnasPx));
+    geo.margenes = Object.assign({}, geo.margenes, {
+      inferior: altoPt - superior - geo.altoCont * PX,
+    });
+  }
+  return geo;
 }
 
 /* ------------------------------------------------------------------ *
@@ -132,11 +158,14 @@ function resolverFamilia(catalogo, pila) {
       continue;
     }
     if (catalogo.tieneFamilia(f)) return f;
-    // Como fontconfig: una familia conocida pero no instalada se
-    // sustituye por su genérica sensata AQUÍ, antes de seguir la pila.
+    // Solo los alias MÉTRICOS de fontconfig sustituyen aquí (Courier,
+    // Helvetica, Arial, Times); cualquier otra familia desconocida se
+    // salta SIN sustituir, como hace Chromium con Skia+fontconfig, y la
+    // pila acaba cayendo en su genérica (serif → Times New Roman).
     const alias =
-      /courier|mono|consol|menlo|monaco/.test(n) ? 'monospace' :
-      /helvetica|arial|verdana|tahoma|geneva|avenir|futura|gill|optima|segoe|myriad/.test(n) ? 'sans-serif' :
+      /^courier( new)?$/.test(n) ? 'monospace' :
+      /^(helvetica|arial)$/.test(n) ? 'sans-serif' :
+      /^times( new roman)?$/.test(n) ? 'serif' :
       null;
     if (alias) {
       const g = generica(alias);
@@ -265,7 +294,7 @@ function construirTypst(documento, hoja, opciones) {
   const opc = opciones || {};
   const catalogo = opc.catalogo;
   const pagina = E.ajustesPagina(hoja, opc.tamanoPagina);
-  const geo = geometria(pagina);
+  const geo = geometria(pagina, { galeria: opc.galeria, alturaColumnasPx: opc.alturaColumnasPx });
   const base = D.atributosBase(hoja);
   const guionado = hoja.bandera('defaults', 'hyphenation', false);
 
@@ -359,15 +388,27 @@ function construirTypst(documento, hoja, opciones) {
       texto = conRoturas(texto, est);
       const f = fuenteDe(est);
       const lh = ctx.lh;
-      const caja = cajaLinea(f.metricas, lh);
-      tramos.push({ ascL: caja.ascL + (extra && extra.elevar ? extra.elevar : 0), descL: caja.descL - (extra && extra.elevar ? extra.elevar : 0) });
+      let caja = cajaLinea(f.metricas, lh);
+      // Ninguna caja baja del «strut» del párrafo: así una línea con solo
+      // texto pequeño (código) mide lo que mediría en CSS. La caja de un
+      // superíndice elevado no se refuerza: su crecimiento es el suyo.
+      if (ctx.cajaStrut && !(extra && extra.elevar)) {
+        caja = {
+          ascL: Math.max(caja.ascL, ctx.cajaStrut.ascL),
+          descL: Math.max(caja.descL, ctx.cajaStrut.descL),
+        };
+      }
+      const elevar = (extra && extra.elevar) || 0;
+      tramos.push({ ascL: caja.ascL + elevar, descL: caja.descL - elevar });
+      // En Typst «baseline:» solo desplaza el dibujo, no las métricas de
+      // línea: la elevación del superíndice se lleva también a los bordes.
       const args = [
         `font: ${cadena(f.familia)}`,
         `size: ${ptTypst(f.pxAvances)}`,
         `weight: ${f.negrita ? '"bold"' : '"regular"'}`,
         `style: ${f.cursiva ? '"italic"' : '"normal"'}`,
-        `top-edge: ${ptTypst(caja.ascL)}`,
-        `bottom-edge: ${ptTypst(-caja.descL)}`,
+        `top-edge: ${ptTypst(caja.ascL + elevar)}`,
+        `bottom-edge: ${ptTypst(-Math.max(caja.descL - elevar, 0))}`,
       ];
       if (est.color && est.color.toLowerCase() !== '#000000') args.push(`fill: rgb(${cadena(est.color)})`);
       if (extra && extra.elevar) args.push(`baseline: ${ptTypst(-extra.elevar)}`);
@@ -384,7 +425,10 @@ function construirTypst(documento, hoja, opciones) {
       for (const nodo of lista || []) {
         switch (nodo.tipo) {
           case 'texto':
-            emitirTexto(colapsar(nodo.valor), est, extra);
+            emitirTexto(ctx.preformateado ? nodo.valor : colapsar(nodo.valor), est, extra);
+            break;
+          case 'hueco':
+            partes.push(`h(${ptTypst(nodo.px)})`);
             break;
           case 'salto':
             partes.push('linebreak()');
@@ -411,11 +455,15 @@ function construirTypst(documento, hoja, opciones) {
             emitirTexto(colapsar(nodo.alias || nodo.destino), est, extra);
             break;
           case 'footnote': {
-            // <sup><a>n</a></sup>: cuerpo «smaller» (÷1,2) y elevado un
-            // tercio del cuerpo del padre; la caja de línea crece si hace falta.
+            // <sup><a>n</a></sup>: cuerpo «smaller» (÷1,2) y elevado como
+            // hace Blink con vertical-align: super — un tercio del cuerpo
+            // del padre redondeado a 1/64 px, más un píxel. La caja de
+            // línea crece si hace falta.
             const padrePx = cuerpoPx(est.tamano);
             const sup = Object.assign({}, est, { tamano: (Math.floor((padrePx / 1.2) * 100 + 1e-6) / 100) * 0.75 });
-            const elevar = lu(padrePx / 3);
+            const elevar = Math.round((padrePx / 3) * 64) / 64 + 1;
+            ctx.fraccionSup = (elevar % 1 + 1) % 1; // para clavar el redondeo en la 2ª pasada
+            if (ctx.marcaSup) partes.push(ctx.marcaSup()); // ¿en qué línea cae?
             emitirTexto(String(nodo.id), sup, Object.assign({}, extra, { elevar }));
             break;
           }
@@ -493,15 +541,29 @@ function construirTypst(documento, hoja, opciones) {
     const tramos = [];
     const ml = lu(ptApx(estilo.ml || 0));
     const mr = lu(ptApx(estilo.mr || 0));
-    const ctx = {
+    // El «strut» del párrafo marca el mínimo de cada línea (como en CSS)
+    const cajaStrut = cajaLinea(f.metricas, lh);
+    const ctxDeEsteParrafo = {
       lh,
       tramos,
+      cajaStrut,
+      preformateado: !!extra.preformateado,
       familiaCodigo: extra.familiaCodigo || familiaCodigoDe(),
       anchoDisponible: geo.anchoColumna - ml - mr,
       fuentePx: f.pxAvances,
     };
-    // El «strut» del párrafo siempre cuenta en la caja de línea
-    const cajaStrut = cajaLinea(f.metricas, lh);
+    const ctx = ctxDeEsteParrafo;
+    // Altura conocida de la primera línea (el marcador de lista siempre
+    // vive en ella); un superíndice en la primera línea se descubre en la
+    // primera pasada y llega por «ajuste».
+    let ascPrimeraLinea = cajaStrut.ascL;
+    // El identificador del bloque y sus marcadores de posición tienen que
+    // existir ANTES de construir el contenido (el del superíndice se
+    // inserta durante esa construcción).
+    const k = indiceBloque++;
+    const posicion = (q) =>
+      `[#context [#metadata((b: ${k}, q: "${q}", p: here().page(), y: here().position().y))<ul-b>]]`;
+    ctx.marcaSup = () => posicion('s');
     tramos.push(cajaStrut);
 
     const sangriaPx = Math.max(0, lu(ptApx(estilo.sangria || 0)));
@@ -535,7 +597,9 @@ function construirTypst(documento, hoja, opciones) {
       const caraM = cara(estiloM.familia, estiloM.negrita, estiloM.cursiva);
       const lineasMarca = lineasEnCaja(caraM, extra.marcador.texto, fm.pxAvances, extra.colgante);
       if (lineasMarca > 1) {
-        tramos.push({ ascL: lineasMarca * lh - cajaM.descL, descL: cajaM.descL });
+        const ascMarca = lineasMarca * lh - cajaM.descL;
+        tramos.push({ ascL: ascMarca, descL: cajaM.descL });
+        ascPrimeraLinea = Math.max(ascPrimeraLinea, ascMarca);
       }
       cuerpo = `box(width: ${ptTypst(extra.colgante)}, baseline: ${ptTypst(cajaM.descL)}, ${marca}) + ${cuerpo}`;
     }
@@ -561,8 +625,14 @@ function construirTypst(documento, hoja, opciones) {
       primera = sangria;
     }
 
-    const k = indiceBloque++;
-    const info = { k, pt, pb, ascL, descL, lh: lhReal, sticky: !!extra.sticky };
+    const info = {
+      // El CSS no admite rellenos negativos: Chromium los trata como 0 y
+      // aquí igual, también en la contabilidad de la segunda pasada.
+      k, pt: Math.max(0, pt), pb: Math.max(0, pb), ascL, descL, lh: lhReal, sticky: !!extra.sticky,
+      ascStrut: cajaStrut.ascL,
+      ascLinea1: ascPrimeraLinea,
+      conSup: !!ctx.fraccionSup,
+    };
     bloquesInfo.push(info);
 
     // Segunda pasada: corrección del relleno para clavar la línea base en
@@ -589,19 +659,22 @@ function construirTypst(documento, hoja, opciones) {
       'linebreaks: "simple"',
     ];
 
-    const posicion = (q) =>
-      `[#context [#metadata((b: ${k}, q: "${q}", p: here().page(), y: here().position().y))<ul-b>]]`;
 
-    // Caja invisible que aporta el relleno superior a la primera línea
+
+    // Caja invisible que aporta el relleno superior a la primera línea:
+    // se apila SOBRE la altura real de esa línea (strut, marcador de
+    // varias líneas o superíndice detectado en la primera pasada).
+    let ascCaja = ascPrimeraLinea;
+    if (ajuste && ajuste[k] && ajuste[k].supEnPrimera) ascCaja = Math.max(ascCaja, ascL);
     const cajaRelleno =
       ptFinal > 0
-        ? `box(width: 0pt, height: ${ptTypst(lhReal + ptFinal)}, baseline: ${ptTypst(descL)}) + `
+        ? `box(width: 0pt, height: ${ptTypst(ascCaja + cajaStrut.descL + ptFinal)}, baseline: ${ptTypst(cajaStrut.descL)}) + `
         : '';
     const relleno = pbFinal > 0 ? `#block(width: 100%, height: ${ptTypst(pbFinal)}, breakable: true)` : '';
 
     salida.push(
       saltoForzado +
-        `#block(width: 100%, above: 0pt, below: 0pt, breakable: ${!extra.indivisible}, sticky: ${!!extra.sticky}, ` +
+        `#block(width: 100%, above: 0pt, below: 0pt, breakable: ${!extra.indivisible}, sticky: false, ` +
         `inset: (left: ${ptTypst(insetIzq)}, right: ${ptTypst(mr)}))[` +
         `#set par(${setPar.join(', ')})\n#set align(${alineacion})\n` +
         `#set text(top-edge: ${ptTypst(ascL)}, bottom-edge: ${ptTypst(-descL)})\n` +
@@ -738,7 +811,28 @@ function construirTypst(documento, hoja, opciones) {
     return E.pilaTipografica(atrs.familia) || 'monospace';
   }
 
+  /**
+   * Bloque espaciador con identidad. El relleno SUPERIOR de un contenedor
+   * es atómico en Blink (no se parte en un corte de página: viaja entero
+   * con lo que viene detrás); el INFERIOR sí se parte y derrama el resto.
+   * La segunda pasada puede recortarlo o anteponerle el salto forzado.
+   */
+  function espaciador(altoPx, atomico) {
+    const k = indiceBloque++;
+    bloquesInfo.push({ k, tipo: 'espacio', alto: altoPx, atomico: !!atomico });
+    const aj = ajuste && ajuste[k];
+    const alto = aj && aj.alto !== undefined ? aj.alto : altoPx;
+    if (aj && aj.saltoAntes) salida.push('#pagebreak(weak: true)');
+    if (alto > 0.01) {
+      salida.push(`#block(width: 100%, above: 0pt, below: 0pt, height: ${ptTypst(alto)}, breakable: ${!atomico})`);
+    }
+  }
+
   function saltoDePagina() {
+    // Dentro de un multicolumna Chromium IGNORA los saltos de página
+    // forzados (medido): no se emite nada para no divergir. Tampoco en
+    // su galería de medición, que debe reflejar el mismo flujo.
+    if (pagina.columnas > 1) return;
     salida.push('#pagebreak(weak: true)');
   }
 
@@ -860,10 +954,13 @@ function construirTypst(documento, hoja, opciones) {
               const est = computar(padre, ...c);
               est.pb = 0;
               if (k > 0) est.pt = 0;
-              // padding-left sv + text-indent -sv (sangría francesa del verso)
+              // padding-left sv + text-indent -sv (sangría francesa del
+              // verso). Ojo: el HTML antiguo pone «text-indent: 0» en las
+              // líneas sangradas con tabuladores, así que ahí no hay
+              // francesa: la sangría del tabulador se suma tal cual.
               const sangriaLinea = E.sangriaDeLinea(l, unidadTab);
               est.ml = (est.ml || 0) + sangriaVersoPt + sangriaLinea;
-              est.sangria = -sangriaVersoPt;
+              est.sangria = sangriaLinea > 0 ? 0 : -sangriaVersoPt;
               emitir(est, l.hijos, { indivisible: true });
               anterior = 'p';
             });
@@ -887,19 +984,24 @@ function construirTypst(documento, hoja, opciones) {
 
         case 'blockquote': {
           const est = computar(padre, declCita);
+          // Hoja de estilos del navegador: blockquote { margin: 1em 40px }.
+          // El CSS del plugin solo pisa los lados que la hoja declara; si
+          // no hay margen lateral declarado, quedan los 40px (30pt) del UA.
+          if (declCita.ml == null) est.ml = 30;
+          if (declCita.mr == null) est.mr = 30;
           // La cita no envuelve a sus hijos en un block (dentro no podría
           // haber saltos de página): sus márgenes se suman a los de los
           // hijos y sus rellenos son bloques espaciadores que, si no caben,
           // se parten igual que el relleno de Blink.
           const ptCita = lu(ptApx(est.pt || 0));
           const pbCita = lu(ptApx(est.pb || 0));
-          if (ptCita > 0) salida.push(`#block(width: 100%, above: 0pt, below: 0pt, height: ${ptTypst(ptCita)}, breakable: true)`);
+          if (ptCita > 0) espaciador(ptCita, true);
           emitirBloques(b.bloques, Object.assign({}, est, { pt: 0, pb: 0, ml: 0, mr: 0 }), {
             enCita: true,
             mlExtra: mlExtra + (est.ml || 0),
             mrExtra: mrExtra + (est.mr || 0),
           });
-          if (pbCita > 0) salida.push(`#block(width: 100%, above: 0pt, below: 0pt, height: ${ptTypst(pbCita)}, breakable: true)`);
+          if (pbCita > 0) espaciador(pbCita);
           anterior = 'blockquote';
           break;
         }
@@ -907,8 +1009,30 @@ function construirTypst(documento, hoja, opciones) {
         case 'code': {
           const est = computar(padre, declPre);
           est.familia = familiaCodigoDe();
-          // white-space: pre-wrap; tabulador a 8 espacios
-          const lineasPre = String(b.texto || '').split('\n').map((l) => [{ tipo: 'texto', valor: l.replace(/\t/g, '        ') || ' ' }]);
+          // white-space: pre-wrap. Los tabuladores avanzan hasta la
+          // siguiente parada de 8 × espacio (tab-size de CSS), medida con
+          // los avances reales de la fuente del código.
+          const fPre = fuenteDe(est);
+          const caraPre = cara(est.familia, est.negrita, est.cursiva);
+          const anchoTab = 8 * METRICAS.medirTexto(caraPre, ' ', fPre.pxAvances);
+          const lineasPre = String(b.texto || '').split('\n').map((l) => {
+            if (!l) return [{ tipo: 'texto', valor: ' ' }];
+            const nodos = [];
+            let x = 0;
+            const trozos = l.split('\t');
+            trozos.forEach((trozo, i) => {
+              if (i > 0) {
+                const parada = anchoTab > 0 ? (Math.floor(x / anchoTab + 1e-6) + 1) * anchoTab : x;
+                nodos.push({ tipo: 'hueco', px: parada - x });
+                x = parada;
+              }
+              if (trozo) {
+                nodos.push({ tipo: 'texto', valor: trozo });
+                x += METRICAS.medirTexto(caraPre, trozo, fPre.pxAvances);
+              }
+            });
+            return nodos.length ? nodos : [{ tipo: 'texto', valor: ' ' }];
+          });
           emitir(est, null, { lineas: lineasPre, preformateado: true, familiaCodigo: est.familia });
           anterior = 'pre';
           break;
@@ -927,11 +1051,14 @@ function construirTypst(documento, hoja, opciones) {
             emitir(est, [{ tipo: 'texto', valor: divisor.texto }], {});
             anterior = 'p';
           } else if (divisor.tipo === 'linea') {
-            // <hr>: línea de 0,5pt arriba, con los márgenes por defecto del navegador (0.5em)
+            // <hr>: borde de 0,5pt que ocupa su grosor, con los márgenes
+            // por defecto del navegador (0,5 em arriba y abajo)
             const em = cuerpoPx(padre.tamano);
+            // El borde de medio punto ocupa en el flujo de Blink un píxel
+            // más de su tamaño nominal (redondeo de bordes sub-píxel).
             salida.push(
               `#block(width: 100%, above: 0pt, below: 0pt, inset: (top: ${ptTypst(lu(em / 2))}, bottom: ${ptTypst(lu(em / 2))}))[` +
-                `#line(length: 100%, stroke: ${fmt(0.5 * S_CHROME)}pt + black)]`
+                `#block(width: 100%, height: ${ptTypst(lu(ptApx(0.5)) + 1)}, fill: rgb("#000000"))]`
             );
             anterior = 'hr';
           }
@@ -940,6 +1067,9 @@ function construirTypst(documento, hoja, opciones) {
 
         case 'figure': {
           const est = computar(padre, declFigura);
+          // figure { margin: 1em 40px } del UA, igual que el blockquote.
+          if (declFigura.ml == null) est.ml = 30;
+          if (declFigura.mr == null) est.mr = 30;
           const f = fuenteDe(est);
           const ctxImg = { anchoDisponible: geo.anchoColumna - lu(ptApx(est.ml || 0)) - lu(ptApx(est.mr || 0)) };
           const exp = imagen(b.ruta, b.alt, ctxImg);
@@ -958,7 +1088,7 @@ function construirTypst(documento, hoja, opciones) {
         }
 
         case 'list':
-          emitirLista(b, padre, 0, mlExtra);
+          emitirLista(b, padre, 0, mlExtra, { ol: 0, ul: 0 });
           anterior = b.ordenada ? 'ol' : 'ul';
           break;
 
@@ -986,42 +1116,55 @@ function construirTypst(documento, hoja, opciones) {
   }
 
   /** Listas: marca en una caja en línea y sangría francesa, como el CSS. */
-  function emitirLista(lista, padre, nivel, mlExtra) {
+  /**
+   * Listas como las ve el CSS del renderizador antiguo:
+   *   · el «nivel» de formato y sangría de una lista es el número de
+   *     ANCESTROS DEL MISMO TIPO (selector «ul ul»), no la profundidad;
+   *   · cada elemento de lista aporta el relleno DIFERENCIAL de su nivel
+   *     (izquierda(n) − izquierda(n−1)), que se va acumulando;
+   *   · «.ulysses li { margin-left }» se suma una vez por cada <li>
+   *     ancestro (la profundidad real).
+   */
+  function emitirLista(lista, padre, profundidad, mlExtra, mismos) {
     mlExtra = mlExtra || 0;
+    mismos = mismos || { ol: 0, ul: 0 };
     const ordenada = !!lista.ordenada;
-    const { izquierda, colgante } = E.sangriaNivel(hoja, base, ordenada, nivel);
-    const formato = E.formatoNivel(hoja, ordenada, nivel);
-    // «.ulysses li { margin-left }» se acumula en cada nivel de anidado
+    const tipo = ordenada ? 'ol' : 'ul';
+    const nivelTipo = Math.min(mismos[tipo], 8);
+    const { izquierda, colgante } = E.sangriaNivel(hoja, base, ordenada, nivelTipo);
+    const previa = nivelTipo === 0 ? 0 : E.sangriaNivel(hoja, base, ordenada, nivelTipo - 1).izquierda;
+    const acumulado = mlExtra + Math.max(0, izquierda - previa);
+    const formato = E.formatoNivel(hoja, ordenada, nivelTipo);
     const liMl = declLi.ml || 0;
+    const contadores = pilaContadores[tipo];
     let contador = 0;
-    let anteriorLi = null;
     lista.items.forEach((item) => {
       contador++;
-      pilaContadores[nivel] = contador; // para los «%*» de niveles anidados
+      contadores[nivelTipo] = contador; // para los «%*» de niveles anidados
       const bloquesItem = item.bloques || [];
-      const marcaTexto = ordenada ? marcadorOrdenado(formato, nivel, contador) : String(formato);
+      const marcaTexto = ordenada ? marcadorOrdenado(formato, nivelTipo, contador) : String(formato);
       let primerParrafo = true;
       bloquesItem.forEach((sub) => {
         if (sub.tipo === 'paragraph' && primerParrafo) {
-          const c = [declLi];
-          const est = computar(padre, ...c);
-          est.ml = (nivel + 1) * liMl + izquierda + mlExtra;
+          const est = computar(padre, declLi);
+          est.ml = (profundidad + 1) * liMl + acumulado;
           est.sangria = 0;
           parrafo(est, sub.hijos, { marcador: { texto: marcaTexto }, colgante: lu(ptApx(colgante)) });
           primerParrafo = false;
         } else if (sub.tipo === 'list') {
           const estLi = computar(padre, declLi);
-          emitirLista(sub, Object.assign({}, estLi, { pt: 0, pb: 0 }), Math.min(nivel + 1, 8), mlExtra);
+          const siguientes = Object.assign({}, mismos);
+          siguientes[tipo] = nivelTipo + 1;
+          emitirLista(sub, Object.assign({}, estLi, { pt: 0, pb: 0 }), profundidad + 1, acumulado, siguientes);
         } else {
           const estLi = computar(padre, declLi);
           estLi.ml = 0;
           emitirBloques([sub], Object.assign({}, estLi, { pt: 0, pb: 0, sangria: 0 }), {
             enLi: true,
-            mlExtra: (nivel + 1) * liMl + izquierda + mlExtra,
+            mlExtra: (profundidad + 1) * liMl + acumulado,
           });
         }
       });
-      anteriorLi = item;
     });
   }
 
@@ -1032,37 +1175,190 @@ function construirTypst(documento, hoja, opciones) {
     // se escribe con su «enumeration-style».
     return String(formato).replace(/%(\d)/g, (m, d) => {
       const idx = Number(d) - 1;
-      const valor = idx === nivel ? n : pilaContadores[idx] || 1;
+      const valor = idx === nivel ? n : pilaContadores.ol[idx] || 1;
       return E.formatearNumero(valor, E.estiloNivel(hoja, true, idx));
     });
   }
-  const pilaContadores = [];
+  const pilaContadores = { ol: [], ul: [] };
 
-  /** Tablas: bordes arriba y abajo, celdas con el relleno de la hoja. */
+  /**
+   * Tablas como las compone el renderizador antiguo (CSS auto + 100%):
+   *   · anchos de columna por contenido: si todo cabe, proporcionales al
+   *     máximo de cada columna; si no, mínimos más reparto del sobrante;
+   *   · relleno de celda: arriba/abajo de la hoja (4pt por defecto),
+   *     6pt a la derecha y 0 a la izquierda (así lo fija el CSS);
+   *   · bordes superior e inferior que ocupan su grosor en el flujo;
+   *   · celdas centradas verticalmente en su fila (vertical-align de
+   *     las celdas HTML).
+   * Cada fila se emite como un bloque propio, así la tabla puede partirse
+   * entre páginas por filas, igual que en Chromium.
+   */
   function emitirTabla(tabla, padre) {
-    const anchoBorde = hoja.puntos('table', 'border-top-width', 12, 1);
-    const padSup = hoja.puntos('table-cell', 'padding-top', 12, 4);
-    const padInf = hoja.puntos('table-cell', 'padding-bottom', 12, 4);
+    const anchoBorde = lu(ptApx(hoja.puntos('table', 'border-top-width', 12, 1)));
+    const padSupPx = lu(ptApx(hoja.puntos('table-cell', 'padding-top', 12, 4)));
+    const padInfPx = lu(ptApx(hoja.puntos('table-cell', 'padding-bottom', 12, 4)));
+    const padDerPx = lu(ptApx(6));
     const columnas = tabla.cabecera.length;
-    const f = fuenteDe(padre);
-    const lh = alturaLinea(padre, f);
-    const caja = cajaLinea(f.metricas, lh);
-    const celda = (nodos, negrita, alineacion) => {
-      const est = Object.assign({}, padre, { negrita: negrita || padre.negrita });
-      const tramos = [];
-      const ctx = { lh, tramos, familiaCodigo: familiaCodigoDe(), anchoDisponible: geo.anchoColumna / columnas };
-      const c = inline(nodos, est, ctx);
-      return `table.cell(align: ${alineacion || 'left'}, [#set text(top-edge: ${ptTypst(caja.ascL)}, bottom-edge: ${ptTypst(-caja.descL)}); #(${c})])`;
+
+    // El CSS del renderizador antiguo NO aplicaba la tipografía de
+    // «table-cell» a las celdas (solo sus rellenos): heredan la base.
+    const estCelda = computar(padre);
+    const estCabecera = Object.assign({}, estCelda, { negrita: true }); // .ulysses th { font-weight: bold }
+    const fCelda = fuenteDe(estCelda);
+    const lh = alturaLinea(estCelda, fCelda);
+    const cajaCelda = cajaLinea(fCelda.metricas, lh);
+
+    // Medición de una celda respetando negritas, cursivas y código: el
+    // contenido se despliega en tramos (texto, cara, cuerpo) y con ellos
+    // se calculan el ancho total (max-content) y la palabra más ancha
+    // (min-content), que es lo que usa el reparto de columnas del CSS.
+    const desplegarTramos = (nodos, est, acumulador) => {
+      for (const nodo of nodos || []) {
+        switch (nodo.tipo) {
+          case 'texto':
+            acumulador.push({ texto: colapsar(nodo.valor), est });
+            break;
+          case 'code':
+            acumulador.push({ texto: nodo.valor, est: Object.assign({}, est, { familia: familiaCodigoDe() }) });
+            break;
+          case 'strong':
+            desplegarTramos(nodo.hijos, Object.assign({}, est, { negrita: true }), acumulador);
+            break;
+          case 'em':
+            desplegarTramos(nodo.hijos, Object.assign({}, est, { cursiva: true }), acumulador);
+            break;
+          case 'wikilink':
+            acumulador.push({ texto: colapsar(nodo.alias || nodo.destino), est });
+            break;
+          default:
+            if (nodo.hijos) desplegarTramos(nodo.hijos, est, acumulador);
+        }
+      }
+      return acumulador;
     };
-    const filas = [];
-    filas.push(tabla.cabecera.map((c, i) => celda(c, true, tabla.alineaciones[i])).join(', '));
-    for (const fila of tabla.filas) filas.push(fila.map((c, i) => celda(c, false, tabla.alineaciones[i])).join(', '));
-    salida.push(
-      `#block(width: 100%, above: 0pt, below: 0pt)[#set par(leading: 0pt, spacing: 0pt, justify: false)\n` +
-        `#table(columns: ${columnas}, stroke: none, ` +
-        `inset: (top: ${ptTypst(lu(ptApx(padSup)))}, bottom: ${ptTypst(lu(ptApx(padInf)))}, left: 0pt, right: ${ptTypst(lu(8))}), ` +
-        `table.hline(stroke: ${fmt(anchoBorde * S_CHROME)}pt + black), ${filas.join(', ')}, table.hline(stroke: ${fmt(anchoBorde * S_CHROME)}pt + black))]`
-    );
+    const medirNodos = (nodos, est) => {
+      const tramosCelda = desplegarTramos(nodos, est, []);
+      let total = 0;
+      let palabraMax = 0;
+      let palabraActual = 0;
+      for (const tr of tramosCelda) {
+        const c = cara(tr.est.familia, tr.est.negrita, tr.est.cursiva);
+        const fx = fuenteDe(tr.est);
+        for (const trozo of tr.texto.split(/(?= )/)) {
+          const w = METRICAS.medirTexto(c, trozo, fx.pxAvances);
+          total += w;
+          if (trozo.startsWith(' ')) palabraActual = w;
+          else palabraActual += w;
+          palabraMax = Math.max(palabraMax, palabraActual);
+        }
+      }
+      return { max: total, min: palabraMax };
+    };
+
+    // Anchos de columna (en px CSS), estilo «table-layout: auto»
+    const anchoTabla = geo.anchoColumna - lu(ptApx(padre.ml || 0)) - lu(ptApx(padre.mr || 0));
+    const maximos = new Array(columnas).fill(0);
+    const minimos = new Array(columnas).fill(0);
+    const todasLasFilas = [tabla.cabecera].concat(tabla.filas);
+    todasLasFilas.forEach((fila, nf) => {
+      fila.forEach((nodos, i) => {
+        if (i >= columnas) return;
+        const m = medirNodos(nodos, nf === 0 ? estCabecera : estCelda);
+        maximos[i] = Math.max(maximos[i], m.max + padDerPx);
+        minimos[i] = Math.max(minimos[i], m.min + padDerPx);
+      });
+    });
+    const sumaMax = maximos.reduce((a, b) => a + b, 0);
+    const sumaMin = minimos.reduce((a, b) => a + b, 0);
+    let anchos;
+    if (sumaMax <= anchoTabla) {
+      anchos = maximos.map((m) => (sumaMax > 0 ? (m * anchoTabla) / sumaMax : anchoTabla / columnas));
+    } else if (sumaMin < anchoTabla) {
+      anchos = maximos.map((m, i) => minimos[i] + ((anchoTabla - sumaMin) * (m - minimos[i])) / (sumaMax - sumaMin));
+    } else {
+      anchos = minimos.map((m) => (sumaMin > 0 ? (m * anchoTabla) / sumaMin : anchoTabla / columnas));
+    }
+
+
+    /** Cuántas líneas ocupa una celda a su ancho (partido voraz). */
+    const lineasDeCelda = (nodos, est, ancho) => {
+      const c = cara(est.familia, est.negrita, est.cursiva);
+      const fx = fuenteDe(est);
+      const texto = colapsar(MD.aTextoPlano(nodos)).trim();
+      if (!texto) return 1;
+      let lineas = 1;
+      let usado = 0;
+      for (const palabra of texto.split(' ')) {
+        const w = METRICAS.medirTexto(c, palabra, fx.pxAvances);
+        const sep = usado > 0 ? METRICAS.medirTexto(c, ' ', fx.pxAvances) : 0;
+        if (usado > 0 && usado + sep + w > ancho + 1e-6) {
+          lineas++;
+          usado = w;
+        } else {
+          usado += sep + w;
+        }
+      }
+      return lineas;
+    };
+
+    const ml = lu(ptApx(padre.ml || 0));
+    const borde = () =>
+      salida.push(
+        `#block(width: 100%, above: 0pt, below: 0pt, inset: (left: ${ptTypst(ml)}))[` +
+          `#block(width: ${ptTypst(anchoTabla)}, height: ${ptTypst(anchoBorde)}, fill: rgb("#000000"))]`
+      );
+
+    const emitirFila = (fila, esCabecera) => {
+      const est = esCabecera ? estCabecera : estCelda;
+      const nLineas = fila.map((nodos, i) => lineasDeCelda(nodos, est, anchos[i] - padDerPx));
+      const altoFila = Math.max(...nLineas, 1) * lh;
+      const off0 = (altoFila - nLineas[0] * lh) / 2;
+      // La fila entra en la contabilidad de la segunda pasada, con la
+      // línea base de su primera celda como referencia.
+      const k = indiceBloque++;
+      const asc1 = off0 + cajaCelda.ascL;
+      bloquesInfo.push({
+        k, pt: padSupPx, pb: padInfPx, ascL: asc1, descL: altoFila - asc1, lh,
+        sticky: false, ascStrut: asc1, ascLinea1: asc1, conSup: false,
+      });
+      const aj = ajuste && ajuste[k];
+      const ptFila = padSupPx + (aj ? (aj.ptExtra || 0) + (aj.deltaPt || 0) : 0);
+      const pbFila = aj && aj.pb !== undefined ? aj.pb : padInfPx;
+      const marca = (q) => `[#context [#metadata((b: ${k}, q: "${q}", p: here().page(), y: here().position().y))<ul-b>]]`;
+      const cajas = fila.map((nodos, i) => {
+        const tramos = [];
+        const ctx = {
+          lh,
+          tramos,
+          cajaStrut: cajaCelda,
+          familiaCodigo: familiaCodigoDe(),
+          anchoDisponible: anchos[i] - padDerPx,
+          fuentePx: fCelda.pxAvances,
+        };
+        const contenido = inline(nodos, est, ctx);
+        const off = (altoFila - nLineas[i] * lh) / 2; // vertical-align: middle
+        const alinear = { right: 'right', center: 'center' }[tabla.alineaciones[i]] || 'left';
+        const marcas = i === 0 ? `${marca('i')} + ${marca('f')} + ` : '';
+        const interior =
+          `#set par(leading: 0pt, spacing: 0pt, justify: false, linebreaks: "simple")\n` +
+          `#set align(${alinear})\n` +
+          (off > 0.01 ? `#v(${ptTypst(off)})` : '') +
+          `#par(${marcas}${contenido})`;
+        return `box(width: ${ptTypst(anchos[i])}, height: ${ptTypst(altoFila)}, inset: (right: ${ptTypst(padDerPx)}), clip: false)[${interior}]`;
+      });
+      // Las cajas van en un «stack» horizontal: no hay partido de línea
+      // posible aunque la suma de anchos toque el límite por un épsilon.
+      salida.push(
+        (aj && aj.saltoAntes ? '#pagebreak(weak: true)\n' : '') +
+          `#block(width: 100%, above: 0pt, below: 0pt, inset: (top: ${ptTypst(ptFila)}, bottom: ${ptTypst(pbFila)}, left: ${ptTypst(ml)}))[` +
+          `#stack(dir: ltr, ${cajas.join(', ')})]`
+      );
+    };
+
+    borde();
+    emitirFila(tabla.cabecera, true);
+    for (const fila of tabla.filas) emitirFila(fila, false);
+    borde();
   }
 
   /* --- notas al pie (como el HTML: lista al final) --- */
@@ -1074,8 +1370,11 @@ function construirTypst(documento, hoja, opciones) {
     const est = computar(raiz, { tamano: tamNota, interlineado: interNota });
     const em = cuerpoPx(tamNota);
     // .notas { margin-top: 24pt; border-top: 0.5pt; padding-top: 8pt }
+    // El borde ocupa su grosor en el flujo, como el border-top del CSS.
+    const grosorNotas = lu(ptApx(0.5)) + 1; // ídem: el borde ocupa 1 px más
     salida.push(
-      `#block(width: 100%, above: 0pt, below: 0pt, inset: (top: ${ptTypst(lu(ptApx(24)))}))[#line(length: 100%, stroke: ${fmt(0.5 * S_CHROME)}pt + black)]`
+      `#block(width: 100%, above: 0pt, below: 0pt, inset: (top: ${ptTypst(lu(ptApx(24)))}))[` +
+        `#block(width: 100%, height: ${ptTypst(grosorNotas)}, fill: rgb("#000000"))]`
     );
     salida.push(`#v(${ptTypst(lu(ptApx(8)))})`);
     const { izquierda, colgante } = E.sangriaNivel(hoja, base, true, 0);
@@ -1105,7 +1404,8 @@ function construirTypst(documento, hoja, opciones) {
     const texto =
       `text(font: ${cadena(f.familia)}, size: ${fmt(16 * PX_PAGINA)}pt, top-edge: ${fmt(m.asc * PX_PAGINA)}pt, bottom-edge: ${fmt(-m.desc * PX_PAGINA)}pt, ` +
       `weight: "regular", style: "normal", str(counter(page).get().first()))`;
-    const ali = pagina.alineacionPie === 'right' ? 'right' : pagina.alineacionPie === 'left' ? 'left' : 'center';
+    // El CSS antiguo solo distinguía derecha; todo lo demás iba al centro
+    const ali = pagina.alineacionPie === 'right' ? 'right' : 'center';
     let pos;
     if (ali === 'center') {
       pos = `place(top + left, dx: ${fmt(centro * PX_PAGINA)}pt - ancho / 2, dy: ${fmt((baseline - m.asc) * PX_PAGINA)}pt, t)`;
@@ -1131,7 +1431,10 @@ function construirTypst(documento, hoja, opciones) {
   const fRaiz = fuenteDe(raiz);
   const cabecera = [
     setPagina,
-    `#set text(font: ${cadena(fRaiz.familia)}, size: ${ptTypst(fRaiz.pxAvances)}, lang: ${cadena(opc.idioma || 'es')}, hyphenate: ${guionado}, overhang: false, fallback: true, costs: (hyphenation: 0%))`,
+    // «hyphenation: yes» de la hoja se ignora a propósito: el Chromium de
+    // Electron no trae diccionarios y nunca guioniza, así que guionizar
+    // aquí rompería la equivalencia (y guionizaría distinto).
+    `#set text(font: ${cadena(fRaiz.familia)}, size: ${ptTypst(fRaiz.pxAvances)}, lang: ${cadena(opc.idioma || 'es')}, hyphenate: false, overhang: false, fallback: true, costs: (hyphenation: 0%))`,
     `#set par(leading: 0pt, spacing: 0pt, justify: ${raiz.alineacion === 'justify'}, linebreaks: "simple")`,
     `#set block(spacing: 0pt)`,
     `#show link: it => it`,
@@ -1174,7 +1477,8 @@ function construirTypst(documento, hoja, opciones) {
  * @param geo         geometría de construirTypst
  * @returns { k: { deltaPt, pb?, saltoAntes? } }
  */
-function calcularAjuste(bloques, posiciones, geo) {
+function calcularAjuste(bloques, posiciones, geo, previo) {
+  previo = previo || {};
   const Hc = geo.altoCont;
   const ajuste = {};
   const px = (yPt) => (yPt - geo.margenes.superior) / PX;
@@ -1182,7 +1486,9 @@ function calcularAjuste(bloques, posiciones, geo) {
   let arrastre = 0; // desplazamiento acumulado en la página actual
   let anterior = null; // { b, p } del bloque previo
 
-  for (const b of bloques) {
+  for (let i = 0; i < bloques.length; i++) {
+    const b = bloques[i];
+    if (b.tipo === 'espacio') continue;
     const p = posiciones[b.k];
     if (!p) continue;
     const a = (ajuste[b.k] = ajuste[b.k] || { deltaPt: 0 });
@@ -1193,28 +1499,77 @@ function calcularAjuste(bloques, posiciones, geo) {
       const continuacion = anterior && anterior.p.paginaFin === p.pagina && anterior.p.pagina < p.pagina;
       arrastre = 0;
       if (anterior && !continuacion && pagina !== -1) {
-        // El anterior terminó en la página previa: se fuerza aquí el salto
-        // y se recorta su relleno inferior a lo que cabía.
+        // El anterior terminó en la página previa. Se fuerza aquí el salto
+        // y su relleno inferior se recorta SIEMPRE a lo que cabe con algo
+        // de holgura: si quedara justo, los ajustes de esta pasada podrían
+        // hacerlo derramar y el salto forzado crearía una página vacía.
         const ap = anterior.p;
-        const fondoAnterior = Math.round(px(ap.yFin)) + anterior.b.descL; // ya redondeado en la 2ª pasada
-        const cabe = Math.max(0, Hc - fondoAnterior);
-        const derrame = Math.max(0, anterior.b.pb - cabe);
-        if (derrame > 0) {
+        const fondoAnterior = Math.round(px(ap.yFin)) + anterior.b.descL;
+        let cabe = Math.max(0, Hc - fondoAnterior - 0.75);
+        const pbAnt = Math.max(0, anterior.b.pb);
+        if (pbAnt > cabe) {
           ajuste[anterior.b.k].pb = cabe;
-          // Chromium arranca la página con el resto del relleno: en la
-          // primera pasada Typst hizo lo mismo, así que «bf» ya lo incluye.
-          // Aquí se aporta explícitamente y se descuenta del desplazamiento.
-          const derrameChromium = Math.max(0, anterior.b.pb - Math.max(0, Hc - (px(ap.yFin) + anterior.b.descL)));
-          a.ptExtra = derrameChromium;
-          arrastre = derrameChromium - derrameChromium; // el relleno extra reproduce el flujo de la 1ª pasada
+          cabe = 0;
+        } else {
+          cabe -= pbAnt;
         }
-        a.saltoAntes = true;
+        // Espaciadores entre el bloque anterior y este. Los atómicos
+        // pegados a este bloque viajan enteros a la página nueva: el
+        // salto forzado se antepone al primero de ellos. Los partibles
+        // anteriores se recortan a lo que cabe.
+        let sumaAtomicos = 0;
+        let primerAtomico = -1;
+        let j = i - 1;
+        while (j >= 0 && bloques[j].tipo === 'espacio' && bloques[j].atomico) {
+          sumaAtomicos += bloques[j].alto;
+          primerAtomico = j;
+          j--;
+        }
+        while (j >= 0 && bloques[j].tipo === 'espacio') {
+          const e = bloques[j];
+          const aE = (ajuste[e.k] = ajuste[e.k] || {});
+          aE.alto = Math.min(e.alto, cabe);
+          cabe = Math.max(0, cabe - e.alto);
+          j--;
+        }
+        // Chromium arranca la página nueva con lo que no cupo del relleno
+        // (menos lo que ya aportan los espaciadores atómicos que saltan).
+        const a1n = b.ascLinea1 || b.ascStrut || 0;
+        const ascMedidoN = previo[b.k] && previo[b.k].supEnPrimera
+          ? Math.max(a1n, b.ascL) + b.pt
+          : Math.max(a1n + b.pt, a1n);
+        const derrameMedido = Math.max(0, bf - ascMedidoN - sumaAtomicos);
+        if (derrameMedido > 0.01) a.ptExtra = derrameMedido;
+        if (primerAtomico !== -1) {
+          const aE = (ajuste[bloques[primerAtomico].k] = ajuste[bloques[primerAtomico].k] || {});
+          aE.saltoAntes = true;
+        } else {
+          a.saltoAntes = true;
+        }
       }
       pagina = p.pagina;
     }
 
-    const objetivo = Math.round(bf);
-    let delta = objetivo - (bf + arrastre);
+    // Chromium redondea el TECHO de la caja de línea y le suma el ascenso
+    // (que puede ser fraccionario con superíndices o marcadores altos).
+    // Con ascenso entero equivale a redondear la línea base directamente.
+    const supEnPrimera =
+      (b.conSup &&
+        (p.sups || []).some((s) => s.pagina === p.pagina && Math.abs(s.y - p.yIni) < 0.02)) ||
+      !!(previo[b.k] && previo[b.k].supEnPrimera);
+    const a1 = b.ascLinea1 || b.ascStrut || 0;
+    // Ascenso de la primera línea tal y como quedó COMPUESTA la pasada
+    // medida: si esa pasada ya llevaba la caja crecida por el
+    // superíndice, el relleno se apila sobre el ascenso crecido.
+    const cajaCrecida = !!(previo[b.k] && previo[b.k].supEnPrimera);
+    const ascMedido = cajaCrecida
+      ? Math.max(a1, b.ascL) + b.pt
+      : Math.max(a1 + b.pt, supEnPrimera ? b.ascL : a1);
+    // El techo que redondea Chromium es el de la CAJA DE LÍNEA, es decir,
+    // después del relleno superior del bloque.
+    const techo = bf - ascMedido + b.pt;
+    let delta = Math.round(techo) - techo - arrastre;
+    if (supEnPrimera) a.supEnPrimera = true;
 
     // El relleno superior no puede quedar negativo: lo que falte se quita
     // del relleno inferior del bloque anterior (misma página).

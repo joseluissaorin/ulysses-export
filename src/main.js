@@ -531,7 +531,11 @@ class UlyssesExport extends Plugin {
       crearCompilador: async (wasmBytes, fuentes) => {
         const glue = require('@myriaddreamin/typst-ts-web-compiler/pkg/typst_ts_web_compiler.mjs');
         if (!this.wasmListo) {
-          glue.initSync({ module: wasmBytes });
+          // Compilación asíncrona: en el hilo principal de Electron no se
+          // permite WebAssembly síncrono de más de 8 MB.
+          const iniciar = glue.default || glue.__wbg_init;
+          if (iniciar) await iniciar({ module_or_path: wasmBytes });
+          else glue.initSync({ module: wasmBytes });
           this.wasmListo = true;
         }
         const b = new glue.TypstCompilerBuilder();
