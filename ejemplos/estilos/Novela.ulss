@@ -1,0 +1,570 @@
+//
+// GitHub 3 Adapted by Katja Rupp for personnal Use
+//
+// Demo style to show fixed-width layout
+// without markup
+//
+// Visit http://www.ulyssesapp.com/styles
+// for full reference
+//
+
+
+
+//
+// Document & Layout Settings
+//
+
+document-settings {
+
+	page-inset-top:    15mm;	page-inset-inner:  20mm
+	page-inset-bottom: 15mm;	page-inset-outer:  25mm
+	
+	section-break:	heading-2
+	// always have H1 and H2 on a new page
+	
+	two-sided:		yes
+	page-binding:		left
+	
+	footnote-enumeration:	continuous
+	footnote-placement:	end-of-page
+	footnote-style:		decimal
+	
+	}
+
+
+
+//
+// Default Typography
+//
+
+defaults {
+
+	font-family:	"Baskerville"
+	font-size:	11pt
+	line-height:	21pt
+	
+	text-alignment: justified
+	hyphenation:	no
+
+	}
+
+
+
+//
+// Basic Non-Text-Area Page Layout
+// 
+
+area-header {
+
+	content:		none
+	top-spacing:		12mm
+	bottom-spacing:		10mm
+	font-size:		6pt
+	text-alignment:		center
+
+	}
+
+
+area-header :first-page {
+
+	content:		none
+	top-spacing:		0mm
+	bottom-spacing:		0mm
+
+	}
+
+	
+area-footnotes {
+
+	font-size:		6pt
+	line-height:		12pt
+	
+	top-spacing:		5mm
+	// additional space cut off from text area
+
+	}
+
+
+area-footer {
+
+	content:		page-number
+	font-size:		9pt		
+	top-spacing:		10mm
+	bottom-spacing:		10mm
+	text-alignment:		center
+
+	}
+
+
+
+
+//
+// Reusable styles (variables & mixins)
+//
+
+$mark-color =		#FEFECC
+$black =		#000000
+$light-grey =		#777777
+$verylight-grey =	#a2a2a2
+$cool-blue = 		#3875d7
+
+// Readable colors FTW!
+
+
+@code {
+
+	font-weight:	normal;
+	font-slant:	normal;
+ 	// Reset all traits to normal, since this can appear anywhere
+	
+	}
+
+
+
+//
+// Headers
+//
+
+heading-all {
+
+	font-size:		12pt;
+	line-height:		100%;
+
+	margin-bottom:		12pt
+
+	keep-with-following:	yes
+	text-alignment: 	left
+
+	}
+
+
+heading-1 {
+
+	style-title:	"Title"	
+	// This is meant to be the title of the Novel that is used only on the first page
+
+	font-size:	34pt
+	font-weight:	normal
+
+	text-alignment: center
+
+	margin-top:	130pt
+	// Since H1 is section break, this adds to first page top margin
+
+	margin-bottom:	100pt
+
+	}
+
+
+heading-2 { 
+
+	style-title:	"Chapters"		
+	// As shown and used by MS Word
+
+	font-size:	23pt
+	font-weight:	normal
+
+	text-alignment: center
+
+	margin-top:	72pt
+	// Since H2 is section break, this adds to first page top margin
+
+	margin-bottom:	72pt
+
+	}
+
+
+
+heading-3 {
+
+	style-title:	"Heading 3"		
+	// As shown and used by MS Word
+
+	font-size:	18pt
+	font-slant:		italic
+	text-alignment: 	center
+
+	margin-top: 	0pt
+	margin-bottom:	26pt
+
+	}
+
+
+heading-4 {
+
+	style-title:		"Adresse"		
+	// This is for the address block on the main page 
+
+	font-size:		11pt
+	font-slant:		italic
+	font-weight:		normal
+	text-alignment: 	left
+	margin-top: 		0pt
+	margin-bottom:		2pt
+	font-color: 	$light-grey
+
+
+	}
+
+
+heading-5 {
+
+	style-title:	"Subtitle"		
+	// This is meant to be the subtitle used on the first page
+
+	font-size:	12pt
+	font-slant:	italic
+	text-alignment: center
+	margin-top: 	24pt
+	margin-bottom:	54pt
+
+
+	}
+
+
+heading-6 {
+
+	style-title:		"Italic Grey AlignR"	
+	// As shown and used by MS Word
+
+	font-size:		11pt
+	font-slant:	italic
+	font-weight:		normal
+	font-color: 	$light-grey
+
+	margin-top: 		0pt
+	margin-bottom:		2pt
+	text-alignment: 	right
+
+	}
+
+
+
+//
+// Paragraph styles
+//
+
+paragraph {
+
+	style-title:		"Paragraph"
+	// As shown and used by MS Word
+
+	first-line-indent:	22pt
+
+	margin-top: 	12pt
+	margin-bottom:	0pt
+
+	}
+
+
+paragraph :first {
+
+	first-line-indent:	0pt
+	// Do not indent the first paragraph, like... ever
+
+	}
+
+
+heading-all + paragraph {
+
+	first-line-indent:	0pt
+	// Do not indent the first paragraph after any headline
+
+	}
+
+
+paragraph-divider {
+
+	first-line-indent:	0pt
+	margin-top: 		20pt
+	margin-bottom:		0pt
+	text-alignment:		center
+	font-color:		#333333
+	content:        	"*****"
+	page-break:		none
+	visibility:		visible
+
+	// Set the divider to help with manual page breaks
+	
+	}
+
+
+paragraph-figure {
+
+	margin-top:	48pt
+	margin-bottom:	48pt
+	
+	text-alignment:	center
+
+}
+
+//
+// Media styles
+//
+
+media-image { 
+	margin-left:	64pt
+	margin-right:	64pt
+}
+
+//
+// Block styles
+//
+
+block-all {
+	
+	margin-top:	24pt
+	margin-bottom:	24pt
+	
+	margin-left:	4em
+	margin-right:	4em
+	
+	}
+
+
+block-code : @code {
+
+	style-title:	"Codeblock"	
+	// As shown and used by MS Word
+
+	font-size:		12pt
+	font-slant:	italic
+	font-color:		#5b5b5b
+	line-height:	18pt
+
+	margin-bottom:  18pt
+	
+	// No need to set the font, since @code calls Menlo
+
+	}
+
+
+block-code paragraph {
+
+	text-alignment:		left
+	
+	hyphenation:		no
+	
+	default-tab-interval: 6em
+	// Set tab stops
+
+	}
+
+block-quote {
+
+	style-title:	"Blockquote"
+	// As shown and used by MS Word
+
+	font-slant:	italic
+	font-color:	#333333
+
+	margin-left: 	3em
+
+	}
+
+
+block-raw {
+
+	visibility:	hidden
+	// kills raw source blocks
+
+	}
+
+
+block-comment {
+
+	visibility:	hidden
+
+}
+
+
+
+//
+// List styles
+//
+
+
+list-all {
+
+	margin-left:	0em
+	margin-top:		12pt;
+	margin-bottom: -12pt;
+
+	}
+
+
+list-all list-all {
+
+	margin-top:		0pt;
+	margin-bottom:	0pt;
+	// No extra spacings between nested ordered and unordered lists
+
+	}
+
+
+list-ordered {
+
+	enumeration-format:	"%d."
+	text-inset:	1em;
+	// Simulates tab stop justified right
+
+	}
+
+
+list-ordered list-ordered {
+
+	enumeration-format:	"%*%d"
+	text-inset:	2em;
+	// Simulates tab stop justified right
+
+	}
+
+
+list-ordered list-ordered list-ordered {
+
+	enumeration-format:	"%*.%d"
+	text-inset:	3em;
+	// Simulates tab stop justified right
+
+	}
+
+
+list-unordered {
+
+	enumeration-format:	"—"
+	text-inset:	2em;
+	// Simulates tab stop justified right
+
+	}
+
+
+//
+// Inline styles
+//
+
+inline-strong {
+
+	style-title:	"Strong"	
+	// As shown and used by MS Word
+
+	font-weight:	bold
+
+	}
+
+
+inline-emphasis {
+
+	style-title:	"Italic"	
+	// As shown and used by MS Word
+
+	font-slant: 	italic;
+
+	}
+
+
+inline-mark {
+
+	style-title:		"Mark"
+	// As shown and used by MS Word
+
+	background-color:	$mark-color
+
+	}
+
+
+inline-citation {
+
+	style-title:	"Inline Cite"	
+	// As shown and used by MS Word
+
+	font-slant:		italic;
+
+	}
+
+
+inline-code : @code {
+
+	style-title:	"Inline Code"	
+	// As shown and used by MS Word
+
+	// Nothing else to set here, since it inherits from @code
+
+	}
+
+
+inline-link {
+
+	style-title:		"Link"
+	// As shown and used by MS Word
+
+	font-color:	$cool-blue
+	underline:	single
+
+	// Good thing we defined readable colors 
+
+	}
+
+
+inline-comment {
+
+	visibility:	hidden;
+	// kills comments
+
+	}
+
+
+inline-delete {
+
+	visibility:	hidden;
+	// deletes deletions
+
+	}
+
+
+inline-annotation {
+
+	background-color:	$mark-color
+
+	}
+
+
+inline-annotation:anchor {
+
+	background-color:	#ffffff
+
+	}
+
+
+inline-raw {
+
+	visibility:	hidden;
+	// kills raw source
+
+	}
+
+
+
+//
+// Ulysses specific stuff
+// By default, we are hiding tags (##) etc.
+//
+
+ulysses-tag {
+
+	visibility:	hidden
+
+	}
+	
+
+inline-link ulysses-tag {
+
+	visibility: hidden
+
+	}
+
+
+list-all ulysses-tag {
+
+	visibility: hidden
+
+	}

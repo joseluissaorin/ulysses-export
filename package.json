@@ -1,0 +1,22 @@
+{
+  "name": "ulysses-export",
+  "version": "2.0.0",
+  "description": "Obsidian plugin: export notes to PDF, DOCX and HTML using real Ulysses .ulss stylesheets. PDF is typeset in-process with Typst (WebAssembly), so it works on desktop and mobile.",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/build.mjs --watch",
+    "test": "node --test test/*.test.js",
+    "install-to-vault": "node scripts/build.mjs && node scripts/instalar.mjs"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "esbuild": "^0.24.0",
+    "obsidian": "latest"
+  },
+  "dependencies": {
+    "@myriaddreamin/typst.ts": "^0.6.0",
+    "@myriaddreamin/typst-ts-web-compiler": "^0.6.0"
+  }
+}

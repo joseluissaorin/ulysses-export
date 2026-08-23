@@ -1,0 +1,13 @@
+import { readFileSync, writeFileSync } from 'node:fs';
+import { initSync, TypstCompilerBuilder } from '@myriaddreamin/typst-ts-web-compiler/pkg/typst_ts_web_compiler.mjs';
+const wasm = readFileSync('node_modules/@myriaddreamin/typst-ts-web-compiler/pkg/typst_ts_web_compiler_bg.wasm');
+initSync({ module: wasm });
+const b = new TypstCompilerBuilder();
+b.set_dummy_access_model();
+for (const f of ['Baskerville.ttc','Optima.ttc']) await b.add_raw_font(readFileSync(process.env.HOME+'/.local/share/fonts/ulysses/'+f));
+const c = await b.build();
+console.log(c.get_loaded_fonts());
+c.add_source('/main.typ', '#set text(font: "Baskerville", size: 12pt)\n#sys.version\n\nHola mundo con *negrita* y _cursiva_. #text(font:"Optima")[Optima]');
+const r = c.compile('/main.typ', null, 'pdf', 0);
+console.log(r.constructor.name, r.length);
+writeFileSync('/tmp/prueba.pdf', r);
