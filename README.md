@@ -48,6 +48,12 @@ plugin never needs the network again. Full instructions (BRAT or manual
 install, fonts, performance, limits) in
 **[`docs/movil.md`](docs/movil.md)** (Spanish).
 
+## Guides (Spanish)
+
+Step-by-step documentation in **[`docs/guias/`](docs/guias/)**: installing
+with BRAT, adding styles and fonts, creating styles, and using it on
+desktop, iOS and Android.
+
 ## Install
 
 Manual, until it lands in the community catalog: copy `main.js`,

@@ -1,6 +1,6 @@
 {
   "name": "ulysses-export",
-  "version": "2.0.2",
+  "version": "2.0.3",
   "description": "Obsidian plugin: export notes to PDF, DOCX and HTML using real Ulysses .ulss stylesheets. PDF is typeset in-process with Typst (WebAssembly), so it works on desktop and mobile.",
   "main": "main.js",
   "private": true,

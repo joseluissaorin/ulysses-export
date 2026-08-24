@@ -64,6 +64,18 @@ depender de la red después.
 Instrucciones completas —instalación con BRAT o a mano, tipografías,
 rendimiento y límites— en **[`docs/movil.md`](docs/movil.md)**.
 
+## Guías paso a paso
+
+Documentación completa, con capturas de cada ajuste y solución de
+problemas, en **[`docs/guias/`](docs/guias/)**:
+
+1. **[Instalar con BRAT](docs/guias/01-instalar-con-brat.md)** — en escritorio y móvil, y cómo actualizar
+2. **[Añadir estilos y tipografías](docs/guias/02-estilos-y-tipografias.md)** — de dónde sacarlos y cómo llegan al móvil
+3. **[Crear estilos](docs/guias/03-crear-estilos.md)** — el editor con previsualización y la sintaxis `.ulss` completa
+4. **[Usarlo en el escritorio](docs/guias/04-uso-escritorio.md)** — Windows, macOS y Linux
+5. **[Usarlo en iPhone y iPad](docs/guias/05-uso-ios.md)**
+6. **[Usarlo en Android](docs/guias/06-uso-android.md)**
+
 ## Instalación
 
 Manual, mientras no esté en el catálogo de plugins de la comunidad:
@@ -78,10 +90,10 @@ exportes un PDF.
 
 ## Uso
 
-1. Copia tus hojas `.ulss` (o paquetes `.ulstyle`) a la carpeta `estilos`
-   del plugin, o configura una carpeta del vault en los ajustes.
-2. Con una nota abierta: paleta de comandos → **«Exportar con un estilo de
-   Ulysses…»**.
+1. Copia tus hojas `.ulss` (o paquetes `.ulstyle`) a cualquier carpeta del
+   vault: el plugin las encuentra solas.
+2. Con la nota abierta: menú **⋮** → **«Exportar con un estilo de
+   Ulysses…»** (o desde la paleta de comandos).
 3. Elige estilo y formato. Listo.
 
 ### Ejemplos

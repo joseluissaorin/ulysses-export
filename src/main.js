@@ -129,6 +129,23 @@ class UlyssesExport extends Plugin {
 
     this.registerView(VISTA.TIPO_VISTA, (leaf) => new VISTA.VistaEstilos(leaf, this));
 
+    // Menú de la nota (el «⋮» de la pestaña, el clic derecho en el
+    // explorador y el menú del editor). En el móvil es la vía cómoda:
+    // la paleta de comandos allí se abre con un gesto poco evidente.
+    const anadirAlMenu = (menu, file) => {
+      if (!file || file.extension !== 'md') return;
+      menu.addItem((item) =>
+        item
+          .setTitle('Exportar con un estilo de Ulysses…')
+          .setIcon('file-output')
+          .onClick(() => new DialogoExportar(this.app, this, file).open())
+      );
+    };
+    this.registerEvent(this.app.workspace.on('file-menu', (menu, file) => anadirAlMenu(menu, file)));
+    this.registerEvent(
+      this.app.workspace.on('editor-menu', (menu, editor, info) => anadirAlMenu(menu, info && info.file))
+    );
+
     this.addCommand({
       id: 'editar-estilo',
       name: 'Crear o editar un estilo de exportación…',
