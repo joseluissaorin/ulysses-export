@@ -100,3 +100,35 @@ compara los dos PDF línea a línea (línea base, x inicial, x final, texto)
 y por píxeles, y genera superposiciones (referencia en un canal de color,
 candidato en otro). Es la herramienta con la que se calibró todo lo
 anterior.
+
+## Más allá de Chromium (2.1)
+
+La composición de libro de la 2.1 ([`libro.md`](libro.md)) hace cosas que
+la vía de impresión antigua no hacía, y ahí el PDF deja de coincidir con
+ella a propósito:
+
+- **Saltos de sección con la semántica de Ulysses.** `heading-2` abre
+  página en los niveles 1 y 2 (el CSS antiguo solo entendía `heading-1`).
+- **Doble cara.** Márgenes en espejo (`margin: (inside, outside)` con
+  `binding`) y secciones en página impar (`pagebreak(to: "odd")`). El
+  ancho de la caja no cambia, así que el partido de líneas es el mismo; el
+  folio se refleja en las páginas cuyo margen interior queda a la derecha.
+  Qué páginas quedan en blanco se sabe tras la pasada de medición y se
+  pasa a la final, porque preguntarlo dentro del documento
+  (`query` en el `foreground`) crece con el cuadrado del número de
+  bloques: 3000 párrafos tardan 10 s y con 6000 el WASM revienta.
+- **Estrofas enteras.** Los versos de una estrofa corta van con
+  `sticky: true`; en las largas, el primero y el penúltimo. El
+  `keep-with-following` de los titulares sigue sin aplicarse, como en
+  Chromium.
+- **Imágenes.** Van dentro de una `box`: Typst trata `image` como bloque y,
+  dentro de un `par`, la descartaba sin avisar, así que en la 2.0 no salía
+  ninguna imagen en el PDF.
+- **Bloques de código** sin la sangría de primera línea heredada de la
+  prosa (el `<pre>` sangraba solo su primera línea). La que declare el
+  propio bloque, como la francesa de Universidad, se respeta.
+- **Raya de diálogo pegada**, conversaciones y epígrafes: cambian el texto
+  o la geometría de esos párrafos.
+
+Todo lo demás sigue clavado al modelo de Chromium. La comprobación está en
+la [batería](bateria.md#regresión-de-la-21).

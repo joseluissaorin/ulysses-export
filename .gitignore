@@ -1,3 +1,4 @@
 node_modules/
 dist/
 *.pdf.tmp
+__pycache__/

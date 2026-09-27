@@ -21,6 +21,13 @@ Android)**, fully offline.
   native list numbering, matching the PDF geometry.
 - **HTML** as a standalone file.
 - A live **`.ulss` style editor** inside Obsidian.
+- **Book typesetting** (since 2.1): full-bleed plates for calligrams and
+  full-page illustrations (detected by their page proportions, rotated or
+  on a landscape page), chapters opening on recto pages with mirrored
+  margins when the style is two-sided, stanzas that never split badly,
+  chat and play transcripts, epigraphs, and Spanish dialogue dashes set
+  as the RAE prescribes. Per-note overrides through `ulysses-…`
+  properties. See [`docs/libro.md`](docs/libro.md) (Spanish).
 
 ## The PDF engine
 
@@ -64,7 +71,8 @@ Manual, until it lands in the community catalog: copy `main.js`,
 ## Examples
 
 See [`ejemplos/`](ejemplos/): one sample note exported with two different
-Ulysses styles (source `.md` + resulting PDFs).
+Ulysses styles, and a short book sample with a calligram plate, a chat,
+a poem and an epigraph (source `.md` + resulting PDFs).
 
 ## Development
 
@@ -72,7 +80,7 @@ Ulysses styles (source `.md` + resulting PDFs).
 npm install
 npm run build     # bundle to dist/
 npm test          # unit tests
-node scripts/exportar.mjs note.md style.ulss out.pdf
+node scripts/exportar.mjs note.md style.ulss out.pdf   # also .docx and .html
 ```
 
 ## License

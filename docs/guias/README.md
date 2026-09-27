@@ -22,6 +22,10 @@ y el ajuste hay que activarlo **en cada dispositivo**.
 
 **Si quieres tocar el diseño:** guía 3.
 
+**Si escribes novela o poesía:** **[Novelas y libros](../libro.md)**
+(láminas a sangre, capítulos en página impar, conversaciones, epígrafes y
+las propiedades `ulysses-…` de cada nota).
+
 ## Documentación técnica
 
 Para quien quiera saber cómo está hecho por dentro:

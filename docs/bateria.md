@@ -77,3 +77,27 @@ fontconfig (solo alias métricos; lo demás cae a la genérica → Times New
 Roman), que el Chromium de Electron no guioniza nunca (sin diccionarios),
 el bloque contenedor de `floor(hueco fraccionario) + 1` px, y que los
 bordes de medio punto ocupan un píxel entero de flujo.
+
+## Regresión de la 2.1
+
+Antes de publicar la 2.1 se exportaron con la 2.0.3 y con la 2.1 los ocho
+documentos de la batería, la muestra de `ejemplos/` y una novela real (con
+caligrama, chat y poema) con los diez estilos de Ulysses instalados en el
+Mac: 100 pares de PDF, comparados línea a línea con tolerancia de 0,06 pt.
+
+- **51 idénticos.**
+- Los demás cambian solo por lo que la 2.1 hace a propósito
+  ([paridad](paridad-chromium.md#más-allá-de-chromium-21)): la raya pegada
+  en las líneas de diálogo (y, en réplicas largas, algún corte de línea),
+  la primera línea de los bloques de código, las estrofas que ya no se
+  parten (Keynote y Columns), los saltos de sección y la doble cara de
+  Novela y Simple Novel, y la novela, que ahora lleva su imagen.
+- La vía de impresión HTML se movió exactamente en los mismos sitios.
+
+El DOCX se comprobó abriéndolo en Microsoft Word y guardándolo como PDF:
+misma paginación que el PDF del plugin (27 páginas en la novela), la
+lámina girada a sangre y los capítulos en impar. De paso apareció un fallo
+antiguo: Novela declara `margin-bottom: -12pt` en `list-all`, el DOCX lo
+escribía como `w:after="-240"` y Word lo leía como un salto enorme tras
+cada bloque de diálogo. Ahora lo negativo cuenta como cero, igual que en
+CSS.

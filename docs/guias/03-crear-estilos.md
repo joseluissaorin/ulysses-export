@@ -40,7 +40,7 @@ Se abre como una pestaña más de Obsidian, partida en dos:
 | **Bloques** | Cita en bloque, bloque de código, listas (marca y sangría), divisor y tablas |
 | **Texto** | Negrita, cursiva, tachado, resaltado, enlaces, código en línea, citas |
 | **Página y notas** | Tamaño y márgenes, número de página, notas al pie, ajustes del párrafo |
-| **Extensiones** | Lo que el plugin añade sobre Ulysses: bibliografía, verso, tabulador, numeración |
+| **Extensiones** | Lo que el plugin añade sobre Ulysses: bibliografía, verso, tabulador, numeración, y la composición de libro (láminas, doble cara, conversaciones, epígrafes) |
 | **Avanzado** | Todas las propiedades en bruto y el `.ulss` como texto editable |
 | **Biblioteca** | Estilos disponibles, para copiar ajustes de unos a otros |
 
@@ -155,8 +155,9 @@ admitidas son `pt`, `mm`, `cm`, `in`, `em` y `%`.
 |---|---|
 | `page-width`, `page-height` | Tamaño propio (si no, manda el ajuste del plugin) |
 | `page-inset-top/bottom/inner/outer` | Márgenes |
-| `two-sided` | `yes` para páginas pares e impares |
-| `section-break` | `heading-1`, `heading-2`… empieza página nueva en ese nivel |
+| `two-sided` | `yes`: márgenes en espejo y cada sección en página impar (con una blanca delante si hace falta) |
+| `page-binding` | `left` (lo normal) o `right`: de qué lado va el lomo |
+| `section-break` | `heading-1`, `heading-2`… página nueva en ese nivel **y en todos los superiores** (`heading-2` = titulares 1 y 2); `paragraph-divider`, en cada divisor |
 | `column-count`, `column-spacing-width` | Texto a varias columnas |
 | `footnote-placement` | `end-of-page`, `end-of-document` |
 | `footnote-style` | `decimal`, `roman`, `alpha`, `symbol` |
@@ -279,6 +280,17 @@ reproduce esa rareza para que las listas queden donde deben.
   lo declaras, se aplican 1,25 cm bajo los títulos que indiques en
   *Ajustes → Títulos de bibliografía*.
 - `figure-caption` — el pie de las imágenes.
+- `paragraph-chat` — las conversaciones (chat, teatro). Sin declarar: al
+  margen, sin aire entre turnos, sin justificar y con sangría francesa.
+  Declara `font-family`, `font-size`, `first-line-indent`, `margin-top` o
+  `text-alignment` para cambiar solo eso.
+- `block-epigraph` — los epígrafes (la cita bajo un titular). Sin
+  declarar: a la derecha, en el 60 % final de la caja y un 10 % más
+  pequeños. Admite `margin-left`, `font-size`, `text-alignment`,
+  `font-slant`…
+
+Ulysses ignora estos selectores, así que puedes dejarlos en una hoja que
+también uses en Ulysses. Más en **[Novelas y libros](../libro.md)**.
 
 **Qué pasa con lo que no se entiende.** Las propiedades desconocidas se
 ignoran sin romper nada. Si un valor está mal escrito, el editor lo dice
