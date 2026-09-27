@@ -378,8 +378,12 @@ function propiedadesParrafo(a, base, extra) {
   if (ind.length) p.push(`<w:ind ${ind.join(' ')}/>`);
 
   const esp = [];
-  esp.push(`w:before="${twips(a.margenSuperior || 0)}"`);
-  esp.push(`w:after="${twips(a.margenInferior || 0)}"`);
+  // OOXML no admite espacios negativos (ST_TwipsMeasure es sin signo), y
+  // Word lee «-240» como un salto enorme: Novela declara «margin-bottom:
+  // -12pt» en list-all y cada bloque de diálogo acababa en página nueva.
+  // Como en CSS, lo negativo cuenta como cero.
+  esp.push(`w:before="${twips(Math.max(0, a.margenSuperior || 0))}"`);
+  esp.push(`w:after="${twips(Math.max(0, a.margenInferior || 0))}"`);
   const inter = a.interlineado || base.interlineado;
   if (inter) {
     esp.push(`w:line="${twips(inter)}"`);
@@ -485,7 +489,10 @@ function aplicarInline(tipo, ctx, h) {
   const def = ESTILOS_INLINE[tipo];
   if (!def) return h;
   const ajustes = inlineDeHoja(ctx.hoja, ctx.base, def.selector, def.porDefecto);
-  if (ajustes.visible === false) return null;
+  // «inline-delete» es en Ulysses una marca de edición que se borra al
+  // exportar, pero el «~~tachado~~» de Obsidian es texto tachado: se ve,
+  // como en el PDF. Muchas hojas (Novela) ocultan las «deletions».
+  if (ajustes.visible === false && tipo !== 'del') return null;
 
   if (!h.rStyle) return unir(h, { rStyle: def.nombre, visible: ajustes.visible });
   const directo = Object.assign({}, ajustes);
@@ -560,7 +567,7 @@ function corridas(nodos, ctx, herencia) {
       }
 
       case 'image': {
-        const dibujo = ctx.imagen(nodo.ruta, nodo.alt);
+        const dibujo = ctx.imagen(nodo.ruta, nodo.alt, nodo);
         if (dibujo) salida.push(`<w:r>${dibujo}</w:r>`);
         break;
       }
