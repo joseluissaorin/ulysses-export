@@ -16,6 +16,8 @@ const DIALOGOS = require('./dialogos.js');
 const VISTA = require('./vista.js');
 const MOTOR = require('./motor.js');
 const TYPSTEMISOR = require('./typst.js');
+const LIBRO = require('./libro.js');
+const { dimensiones } = require('./imagenes.js');
 /*
  * Ulysses Export — pegamento con Obsidian.
  * Lee hojas .ulss reales y exporta a PDF, DOCX y HTML.
@@ -40,6 +42,13 @@ const DEFECTOS = {
   sangriaVersoEm: 2,
   numeroInicial: 1,
   desdePagina: 1,
+  // Composición de libro (ver libro.js). Cada nota puede fijar los suyos
+  // en sus propiedades: «ulysses-laminas», «ulysses-doble-cara»…
+  laminas: 'girada', // lámina apaisada en libro vertical: 'girada' | 'apaisada' | 'no'
+  dobleCara: 'estilo', // 'estilo' | 'si' | 'no'
+  epigrafes: false,
+  conversaciones: true,
+  rayaPegada: true,
   encabezadosBibliografia: [
     'Bibliografía',
     'Referencias',
@@ -57,47 +66,6 @@ const MIMES = {
   svg: 'image/svg+xml',
   bmp: 'image/bmp',
 };
-
-/* ------------------------------------------------------------------ *
- * Dimensiones de imagen (sin decodificar el bitmap entero)
- * ------------------------------------------------------------------ */
-
-function dimensiones(bytes, extension) {
-  try {
-    const b = new Uint8Array(bytes);
-    const ext = (extension || '').toLowerCase();
-
-    if (ext === 'png' && b.length > 24) {
-      const v = new DataView(b.buffer, b.byteOffset);
-      return { ancho: v.getUint32(16), alto: v.getUint32(20) };
-    }
-
-    if ((ext === 'jpg' || ext === 'jpeg') && b.length > 4) {
-      let i = 2;
-      while (i < b.length - 9) {
-        if (b[i] !== 0xff) {
-          i++;
-          continue;
-        }
-        const marca = b[i + 1];
-        // SOF0..SOF15, saltando DHT/DAC/RST
-        if (marca >= 0xc0 && marca <= 0xcf && marca !== 0xc4 && marca !== 0xc8 && marca !== 0xcc) {
-          const v = new DataView(b.buffer, b.byteOffset);
-          return { alto: v.getUint16(i + 5), ancho: v.getUint16(i + 7) };
-        }
-        const largo = (b[i + 2] << 8) | b[i + 3];
-        i += 2 + largo;
-      }
-    }
-
-    if (ext === 'gif' && b.length > 10) {
-      return { ancho: b[6] | (b[7] << 8), alto: b[8] | (b[9] << 8) };
-    }
-  } catch (e) {
-    /* si no se puede, se escala al ancho util */
-  }
-  return null;
-}
 
 function aBase64(buffer) {
   if (obsidian.arrayBufferToBase64) return obsidian.arrayBufferToBase64(buffer);
@@ -422,6 +390,9 @@ class UlyssesExport extends Plugin {
           // px a pt a 96 ppp, que es como se comportan las capturas
           ancho: dim ? dim.ancho * 0.75 : null,
           alto: dim ? dim.alto * 0.75 : null,
+          // y los píxeles tal cual, para decidir si es una lámina
+          anchoPx: dim ? dim.ancho : null,
+          altoPx: dim ? dim.alto : null,
           base64: null,
         });
       } catch (e) {
@@ -441,17 +412,49 @@ class UlyssesExport extends Plugin {
     return { documento, recursos };
   }
 
-  opcionesComunes(file, recursos) {
+  /** Propiedades de la nota: las de la caché de Obsidian, que es la fiable. */
+  async propiedadesDe(file) {
+    try {
+      const cache = this.app.metadataCache.getFileCache(file);
+      if (cache && cache.frontmatter) return cache.frontmatter;
+    } catch (e) { /* sin caché: se lee a mano */ }
+    try {
+      return MARKDOWN.analizar(await this.app.vault.cachedRead(file)).propiedades || {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  /**
+   * Ajustes con los que se exporta una nota: los generales, pisados por
+   * lo que la nota fije en sus propiedades «ulysses-…».
+   */
+  async ajustesPara(file) {
+    const deNota = LIBRO.ajustesDeNota(await this.propiedadesDe(file));
+    return { ajustes: Object.assign({}, this.ajustes, deNota), deNota };
+  }
+
+  /**
+   * Opciones de exportación. «eleccion» es lo que se ha elegido en el
+   * diálogo para esta exportación y manda sobre todo lo demás.
+   */
+  opcionesComunes(file, recursos, ajustesNota, eleccion) {
+    const a = Object.assign({}, ajustesNota || this.ajustes, eleccion || {});
     return {
       titulo: file.basename,
-      tamanoPagina: this.ajustes.tamanoPagina,
-      incluirComentarios: this.ajustes.incluirComentarios,
-      encabezadosBibliografia: this.ajustes.encabezadosBibliografia,
-      modoLineas: this.ajustes.modoLineas,
-      anchoTabuladorEm: this.ajustes.anchoTabuladorEm || 0,
-      sangriaVersoEm: this.ajustes.sangriaVersoEm,
-      numeroInicial: this.ajustes.numeroInicial,
-      desdePagina: this.ajustes.desdePagina,
+      tamanoPagina: a.tamanoPagina,
+      incluirComentarios: a.incluirComentarios,
+      encabezadosBibliografia: a.encabezadosBibliografia,
+      modoLineas: a.modoLineas,
+      anchoTabuladorEm: a.anchoTabuladorEm || 0,
+      sangriaVersoEm: a.sangriaVersoEm,
+      numeroInicial: a.numeroInicial,
+      desdePagina: a.desdePagina,
+      laminas: a.laminas,
+      dobleCara: a.dobleCara,
+      epigrafes: a.epigrafes,
+      conversaciones: a.conversaciones,
+      rayaPegada: a.rayaPegada,
       recursos: (ruta) => recursos.get(ruta) || null,
       recursoUrl: (ruta) => {
         const r = recursos.get(ruta);
@@ -462,18 +465,20 @@ class UlyssesExport extends Plugin {
     };
   }
 
-  async exportarDocx(file, rutaHoja) {
+  async exportarDocx(file, rutaHoja, eleccion) {
     const hoja = await this.cargarHoja(rutaHoja);
     const { documento, recursos } = await this.preparar(file);
-    const bytes = ENSAMBLADO.construirDocx(documento, hoja, this.opcionesComunes(file, recursos));
+    const { ajustes } = await this.ajustesPara(file);
+    const bytes = ENSAMBLADO.construirDocx(documento, hoja, this.opcionesComunes(file, recursos, ajustes, eleccion));
     const destino = await this.guardar(file.basename + '.docx', bytes);
     new Notice(`DOCX guardado en ${destino}`);
   }
 
-  async exportarHtml(file, rutaHoja) {
+  async exportarHtml(file, rutaHoja, eleccion) {
     const hoja = await this.cargarHoja(rutaHoja);
     const { documento, recursos } = await this.preparar(file);
-    const html = ENSAMBLADO.construirHtml(documento, hoja, this.opcionesComunes(file, recursos));
+    const { ajustes } = await this.ajustesPara(file);
+    const html = ENSAMBLADO.construirHtml(documento, hoja, this.opcionesComunes(file, recursos, ajustes, eleccion));
     const destino = await this.guardar(file.basename + '.html', html);
     new Notice(`HTML guardado en ${destino}`);
   }
@@ -482,9 +487,10 @@ class UlyssesExport extends Plugin {
    * PDF compuesto por el propio plugin con Typst (WebAssembly): idéntico
    * en escritorio y en el móvil, sin diálogo de impresión.
    */
-  async exportarPdf(file, rutaHoja) {
+  async exportarPdf(file, rutaHoja, eleccion) {
     const hoja = await this.cargarHoja(rutaHoja);
     const { documento, recursos } = await this.preparar(file);
+    const { ajustes } = await this.ajustesPara(file);
     const { compilador, catalogo } = await MOTOR.prepararMotor(
       this.entornoMotor(),
       hoja,
@@ -492,7 +498,7 @@ class UlyssesExport extends Plugin {
       ENSAMBLADO,
       (m) => new Notice(m)
     );
-    const opciones = Object.assign(this.opcionesComunes(file, recursos), { catalogo });
+    const opciones = Object.assign(this.opcionesComunes(file, recursos, ajustes, eleccion), { catalogo });
     const { pdf, avisos } = MOTOR.compilarPdf(compilador, documento, hoja, opciones);
     const destino = await this.guardar(file.basename + '.pdf', pdf);
     for (const a of avisos) new Notice(a);
@@ -500,10 +506,11 @@ class UlyssesExport extends Plugin {
   }
 
   /** PDF por el diálogo de impresión del sistema (solo escritorio). */
-  async exportarPdfImprimiendo(file, rutaHoja) {
+  async exportarPdfImprimiendo(file, rutaHoja, eleccion) {
     const hoja = await this.cargarHoja(rutaHoja);
     const { documento, recursos } = await this.preparar(file);
-    const html = ENSAMBLADO.construirHtml(documento, hoja, this.opcionesComunes(file, recursos));
+    const { ajustes } = await this.ajustesPara(file);
+    const html = ENSAMBLADO.construirHtml(documento, hoja, this.opcionesComunes(file, recursos, ajustes, eleccion));
     await this.imprimir(html);
   }
 
@@ -722,10 +729,43 @@ class DialogoExportar extends Modal {
     this.file = file;
     this.seleccion = null;
     this.verTodos = false;
+    // Lo elegido para esta exportación (composición de libro). Se
+    // conserva al repintar el diálogo.
+    this.eleccion = null;
+    this.dobleCaraTocada = false;
   }
 
   async onOpen() {
+    const { ajustes, deNota } = await this.plugin.ajustesPara(this.file);
+    this.ajustesNota = ajustes;
+    this.deNota = deNota;
+    this.eleccion = {
+      tamanoPagina: ajustes.tamanoPagina,
+      laminas: ajustes.laminas || 'girada',
+      dobleCara: null, // se decide con el estilo elegido (ver dobleCaraDelEstilo)
+      epigrafes: !!ajustes.epigrafes,
+      conversaciones: ajustes.conversaciones !== false,
+      rayaPegada: ajustes.rayaPegada !== false,
+    };
     await this.pintar();
+  }
+
+  /**
+   * Doble cara por defecto: la de la nota o los ajustes si la fijan; si
+   * no, la del estilo elegido («two-sided»). Si ya se ha tocado el
+   * interruptor, manda lo tocado.
+   */
+  async dobleCaraDelEstilo() {
+    if (this.dobleCaraTocada) return this.eleccion.dobleCara;
+    const fijada = this.ajustesNota.dobleCara;
+    if (fijada === 'si') return true;
+    if (fijada === 'no') return false;
+    try {
+      const hoja = await this.plugin.cargarHoja(this.seleccion.ruta);
+      return !!ENSAMBLADO.ajustesPagina(hoja, this.eleccion.tamanoPagina).dosCaras;
+    } catch (e) {
+      return false;
+    }
   }
 
   /** Se repinta al alternar la lista o al volver del editor. */
@@ -754,10 +794,19 @@ class DialogoExportar extends Modal {
       return;
     }
 
+    // El estilo que pide la nota («ulysses-estilo») se ofrece siempre,
+    // aunque no esté entre los visibles, y es el propuesto.
+    const pedido = this.deNota && this.deNota.estilo ? String(this.deNota.estilo).toLowerCase() : null;
+    const deLaNota = pedido ? todas.find((h) => h.nombre.toLowerCase() === pedido) : null;
+    if (deLaNota && !hojas.some((h) => h.ruta === deLaNota.ruta)) hojas.push(deLaNota);
+
     // Se conserva la eleccion previa si sigue estando en la lista.
     const previa = this.seleccion && hojas.find((h) => h.ruta === this.seleccion.ruta);
     this.seleccion =
-      previa || hojas.find((h) => h.nombre === this.plugin.ajustes.estiloPorDefecto) || hojas[0];
+      previa || deLaNota || hojas.find((h) => h.nombre === this.plugin.ajustes.estiloPorDefecto) || hojas[0];
+    if (this.eleccion.dobleCara === null || !this.dobleCaraTocada) {
+      this.eleccion.dobleCara = await this.dobleCaraDelEstilo();
+    }
 
     const ajusteEstilo = new Setting(contentEl)
       .setName('Estilo')
@@ -771,8 +820,11 @@ class DialogoExportar extends Modal {
       .addDropdown((d) => {
         for (const h of hojas) d.addOption(h.ruta, h.nombre);
         d.setValue(this.seleccion.ruta);
-        d.onChange((v) => {
+        d.onChange(async (v) => {
           this.seleccion = hojas.find((h) => h.ruta === v) || this.seleccion;
+          // Cambiar de estilo cambia la doble cara por defecto.
+          this.eleccion.dobleCara = await this.dobleCaraDelEstilo();
+          if (this.interruptorDobleCara) this.interruptorDobleCara.setValue(!!this.eleccion.dobleCara);
         });
       });
 
@@ -803,12 +855,18 @@ class DialogoExportar extends Modal {
         d.addOption('a4', 'A4');
         d.addOption('letter', 'Carta');
         d.addOption('legal', 'Oficio');
-        d.setValue(this.plugin.ajustes.tamanoPagina);
+        d.setValue(this.eleccion.tamanoPagina || this.plugin.ajustes.tamanoPagina);
         d.onChange(async (v) => {
-          this.plugin.ajustes.tamanoPagina = v;
-          await this.plugin.saveData(this.plugin.ajustes);
+          this.eleccion.tamanoPagina = v;
+          // Se recuerda, salvo que la nota fije el suyo.
+          if (!this.deNota || this.deNota.tamanoPagina === undefined) {
+            this.plugin.ajustes.tamanoPagina = v;
+            await this.plugin.saveData(this.plugin.ajustes);
+          }
         });
       });
+
+    this.pintarComposicion(contentEl);
 
     // Carpeta de destino, elegible aqui mismo. Se recuerda para la
     // proxima vez, pero se puede cambiar sin entrar en los ajustes.
@@ -856,10 +914,11 @@ class DialogoExportar extends Modal {
 
     const lanzar = async (accion, etiqueta) => {
       const hoja = this.seleccion;
+      const eleccion = Object.assign({}, this.eleccion);
       this.close();
       const aviso = new Notice(`Exportando a ${etiqueta}…`, 0);
       try {
-        await accion.call(this.plugin, this.file, hoja.ruta);
+        await accion.call(this.plugin, this.file, hoja.ruta, eleccion);
       } catch (e) {
         console.error('[Ulysses Export]', e);
         new Notice(`Falló la exportación: ${e && e.message ? e.message : e}`);
@@ -887,6 +946,93 @@ class DialogoExportar extends Modal {
     }
 
     botones.createEl('button', { text: 'Cancelar' }).addEventListener('click', () => this.close());
+  }
+
+  /**
+   * Composición de libro: lo que la hoja .ulss no puede decir y un libro
+   * necesita. Vale solo para esta exportación; los valores por defecto
+   * están en los ajustes y cada nota puede fijar los suyos.
+   */
+  pintarComposicion(contentEl) {
+    new Setting(contentEl).setHeading().setName('Composición de libro');
+    const deNota = (clave) =>
+      this.deNota && this.deNota[clave] !== undefined ? ' Fijado en las propiedades de esta nota.' : '';
+
+    new Setting(contentEl)
+      .setName('Láminas')
+      .setDesc(
+        'Las imágenes con la proporción de la página van solas, a sangre y en su ' +
+          'propia página. Esto decide qué hacer con las apaisadas en un libro vertical.' +
+          deNota('laminas')
+      )
+      .addDropdown((d) => {
+        d.addOption('girada', 'Girada en página vertical (imprenta)');
+        d.addOption('apaisada', 'Página apaisada (pantalla)');
+        d.addOption('no', 'Ninguna: imágenes dentro del texto');
+        d.setValue(this.eleccion.laminas);
+        d.onChange((v) => {
+          this.eleccion.laminas = v;
+        });
+      });
+
+    new Setting(contentEl)
+      .setName('Imprimir a doble cara')
+      .setDesc(
+        'Márgenes en espejo y cada capítulo en página impar, con una página en ' +
+          'blanco delante si hace falta. Por defecto, lo que diga el estilo.' +
+          deNota('dobleCara')
+      )
+      .addToggle((t) => {
+        this.interruptorDobleCara = t;
+        t.setValue(!!this.eleccion.dobleCara);
+        t.onChange((v) => {
+          // En Obsidian, «setValue» también dispara «onChange»: cuando el
+          // cambio viene de elegir otro estilo, el valor ya está puesto y
+          // no cuenta como tocado a mano.
+          if (v === !!this.eleccion.dobleCara) return;
+          this.eleccion.dobleCara = v;
+          this.dobleCaraTocada = true;
+        });
+      });
+
+    new Setting(contentEl)
+      .setName('Epígrafes')
+      .setDesc(
+        'Una cita justo debajo de un titular se compone como epígrafe: a la ' +
+          'derecha, más pequeña y sin sangría.' +
+          deNota('epigrafes')
+      )
+      .addToggle((t) =>
+        t.setValue(!!this.eleccion.epigrafes).onChange((v) => {
+          this.eleccion.epigrafes = v;
+        })
+      );
+
+    new Setting(contentEl)
+      .setName('Conversaciones')
+      .setDesc(
+        'Chats y obras de teatro (un nombre en negrita y su texto) como un ' +
+          'registro: al margen, sin sangría ni aire entre turnos.' +
+          deNota('conversaciones')
+      )
+      .addToggle((t) =>
+        t.setValue(!!this.eleccion.conversaciones).onChange((v) => {
+          this.eleccion.conversaciones = v;
+        })
+      );
+
+    new Setting(contentEl)
+      .setName('Raya de diálogo pegada')
+      .setDesc(
+        '«—¿No vienes?» y no «— ¿No vienes?», como pide el DPD. Solo cambia el ' +
+          'documento exportado, no tu nota.' +
+          deNota('rayaPegada')
+      )
+      .addToggle((t) =>
+        t.setValue(!!this.eleccion.rayaPegada).onChange((v) => {
+          this.eleccion.rayaPegada = v;
+        })
+      );
   }
 
   /**
@@ -1078,6 +1224,89 @@ class AjustesExport extends PluginSettingTab {
             this.plugin.ajustes.sangriaVersoEm = Number.isFinite(n) && n >= 0 ? n : 2;
             await guardar();
           })
+      );
+
+    containerEl.createEl('h3', { text: 'Libro' });
+    containerEl.createEl('p', {
+      cls: 'setting-item-description',
+      text:
+        'Valores por defecto. El diálogo de exportar deja cambiarlos para cada ' +
+        'exportación, y cada nota puede fijar los suyos en sus propiedades: ' +
+        '«ulysses-estilo», «ulysses-laminas» (girada, apaisada o no), ' +
+        '«ulysses-doble-cara», «ulysses-epigrafes», «ulysses-conversaciones», ' +
+        '«ulysses-raya-pegada» y «ulysses-tamano-pagina».',
+    });
+
+    new Setting(containerEl)
+      .setName('Láminas')
+      .setDesc(
+        'Una imagen con la proporción de la página va sola, a sangre, en su propia ' +
+          'página. Si es apaisada y el libro vertical, se gira dentro de la página ' +
+          '(como en imprenta) o esa página del PDF pasa a ser apaisada (para pantalla).'
+      )
+      .addDropdown((d) => {
+        d.addOption('girada', 'Girada en página vertical (imprenta)');
+        d.addOption('apaisada', 'Página apaisada (pantalla)');
+        d.addOption('no', 'Ninguna: imágenes dentro del texto');
+        d.setValue(this.plugin.ajustes.laminas || 'girada');
+        d.onChange(async (v) => {
+          this.plugin.ajustes.laminas = v;
+          await guardar();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName('Doble cara')
+      .setDesc(
+        'Márgenes en espejo y cada sección en página impar, con páginas en blanco ' +
+          'cuando haga falta. Es lo que hace Ulysses con «two-sided: yes».'
+      )
+      .addDropdown((d) => {
+        d.addOption('estilo', 'Lo que diga el estilo');
+        d.addOption('si', 'Siempre');
+        d.addOption('no', 'Nunca');
+        d.setValue(this.plugin.ajustes.dobleCara || 'estilo');
+        d.onChange(async (v) => {
+          this.plugin.ajustes.dobleCara = v;
+          await guardar();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName('Epígrafes')
+      .setDesc(
+        'Componer como epígrafe (a la derecha, más pequeño, sin sangría) la cita ' +
+          'que va justo debajo de un titular. Desactivado por defecto: en unos ' +
+          'apuntes, una cita bajo un titular no siempre es un epígrafe.'
+      )
+      .addToggle((t) =>
+        t.setValue(!!this.plugin.ajustes.epigrafes).onChange(async (v) => {
+          this.plugin.ajustes.epigrafes = v;
+          await guardar();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName('Conversaciones')
+      .setDesc(
+        'Chats y obras de teatro (párrafos que empiezan con un nombre en negrita) ' +
+          'como un registro: al margen, sin sangría ni aire entre turnos.'
+      )
+      .addToggle((t) =>
+        t.setValue(this.plugin.ajustes.conversaciones !== false).onChange(async (v) => {
+          this.plugin.ajustes.conversaciones = v;
+          await guardar();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName('Raya de diálogo pegada')
+      .setDesc('«—¿No vienes?» y no «— ¿No vienes?», como pide el DPD. Solo en la salida.')
+      .addToggle((t) =>
+        t.setValue(this.plugin.ajustes.rayaPegada !== false).onChange(async (v) => {
+          this.plugin.ajustes.rayaPegada = v;
+          await guardar();
+        })
       );
 
     containerEl.createEl('h3', { text: 'Bibliografía' });

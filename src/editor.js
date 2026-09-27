@@ -182,10 +182,12 @@ const SECCIONES = [
       l('document-settings', 'page-inset-outer', 'Margen exterior'),
       l('document-settings', 'page-width', 'Ancho de página', 'Vacío = el del ajuste general'),
       l('document-settings', 'page-height', 'Alto de página'),
-      o('document-settings', 'two-sided', 'A doble cara', SI_NO),
+      o('document-settings', 'two-sided', 'A doble cara', SI_NO, 'Márgenes en espejo y secciones en página impar'),
+      o('document-settings', 'page-binding', 'Encuadernación', [['', '(izquierda)'], ['left', 'Izquierda'], ['right', 'Derecha']]),
+      // Como en Ulysses: ese nivel y todos los superiores abren sección.
       o('document-settings', 'section-break', 'Empezar página nueva en', [
-        ['', '(nunca)'], ['heading-1', 'Titular 1'], ['heading-2', 'Titular 2'],
-        ['heading-3', 'Titular 3'], ['paragraph-divider', 'Divisor'],
+        ['', '(nunca)'], ['heading-1', 'Titulares 1'], ['heading-2', 'Titulares 1 y 2'],
+        ['heading-3', 'Titulares 1 a 3'], ['paragraph-divider', 'Divisor'],
       ]),
       l('document-settings', 'column-count', 'Columnas', 'Un número: 1, 2, 3…'),
       l('document-settings', 'column-spacing-width', 'Separación entre columnas'),
@@ -249,6 +251,28 @@ const SECCIONES = [
       l('list-unordered', 'text-inset', 'Separación de la viñeta'),
       t('list-ordered', 'enumeration-format', 'Formato numerado', '"%d." o "%*.%d"'),
       l('list-ordered', 'text-inset', 'Separación del número'),
+    ],
+  },
+  {
+    // Extensiones del plugin: Ulysses ignora estos selectores.
+    titulo: 'Conversaciones (extensión)',
+    campos: [
+      t('paragraph-chat', 'font-family', 'Tipografía', 'Por ejemplo "Verdana" para la pantalla'),
+      l('paragraph-chat', 'font-size', 'Cuerpo'),
+      l('paragraph-chat', 'line-height', 'Interlineado'),
+      l('paragraph-chat', 'first-line-indent', 'Sangría', 'Negativa = francesa. Vacío: francesa automática'),
+      l('paragraph-chat', 'margin-top', 'Espacio entre turnos', 'Vacío: ninguno'),
+      o('paragraph-chat', 'text-alignment', 'Alineación', ALINEACIONES),
+    ],
+  },
+  {
+    titulo: 'Epígrafe (extensión)',
+    campos: [
+      l('block-epigraph', 'margin-left', 'Margen izquierdo', 'Vacío: el 40 % de la caja'),
+      l('block-epigraph', 'font-size', 'Cuerpo', 'Vacío: un 10 % menos que la cita'),
+      o('block-epigraph', 'text-alignment', 'Alineación', ALINEACIONES),
+      o('block-epigraph', 'font-slant', 'Inclinación', [['', '(la de la cita)'], ['normal', 'Redonda'], ['italic', 'Cursiva']]),
+      l('block-epigraph', 'margin-bottom', 'Espacio después'),
     ],
   },
   {

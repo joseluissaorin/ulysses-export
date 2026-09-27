@@ -336,6 +336,11 @@ class VistaEstilos extends ItemView {
           encabezadosBibliografia: this.plugin.ajustes.encabezadosBibliografia,
           numeroInicial: this.plugin.ajustes.numeroInicial,
           desdePagina: this.plugin.ajustes.desdePagina,
+          laminas: this.plugin.ajustes.laminas,
+          dobleCara: this.plugin.ajustes.dobleCara,
+          epigrafes: this.plugin.ajustes.epigrafes,
+          conversaciones: this.plugin.ajustes.conversaciones,
+          rayaPegada: this.plugin.ajustes.rayaPegada,
         });
         this.marco.srcdoc = html;
         this.aplicarZoom();
@@ -723,6 +728,15 @@ class VistaEstilos extends ItemView {
         if (v === this.plugin.ajustes[clave]) op.selected = true;
       }
       sel.addEventListener('change', () => guardar(sel.value));
+    } else if (tipo === 'booleano') {
+      // Sí/No de verdad: un <select> devuelve cadenas, y «false» es verdadero.
+      const sel = der.createEl('select', { cls: 'ulx-opcion' });
+      for (const [v, e] of [[true, 'Sí'], [false, 'No']]) {
+        const op = sel.createEl('option', { text: e });
+        op.value = v ? 'si' : 'no';
+        if (!!this.plugin.ajustes[clave] === v) op.selected = true;
+      }
+      sel.addEventListener('change', () => guardar(sel.value === 'si'));
     } else if (tipo === 'numero') {
       const num = der.createEl('input', { cls: 'ulx-num' });
       num.type = 'number';
@@ -822,8 +836,52 @@ class VistaEstilos extends ItemView {
     this.ajustePlugin(
       com, 'Incluir los comentarios %% %%',
       'El estilo manda: si declara «block-comment { visibility: visible }» salen igualmente.',
-      'incluirComentarios', 'opcion', [[true, 'Sí'], [false, 'No']]
+      'incluirComentarios', 'booleano'
     );
+
+    const libro = this.grupo(
+      cont, 'Libro',
+      'Láminas, doble cara, conversaciones y epígrafes. Valores por defecto: el ' +
+        'diálogo de exportar deja cambiarlos, y cada nota puede fijar los suyos con ' +
+        'propiedades «ulysses-…».'
+    );
+    this.ajustePlugin(
+      libro, 'Láminas',
+      'Una imagen con la proporción de la página va sola y a sangre en su página. Qué hacer si es apaisada.',
+      'laminas', 'opcion',
+      [
+        ['girada', 'Girada en página vertical (imprenta)'],
+        ['apaisada', 'Página apaisada (pantalla)'],
+        ['no', 'Ninguna: imágenes dentro del texto'],
+      ]
+    );
+    this.ajustePlugin(
+      libro, 'Doble cara',
+      'Márgenes en espejo y cada sección en página impar, con blancas si hace falta.',
+      'dobleCara', 'opcion',
+      [['estilo', 'Lo que diga el estilo'], ['si', 'Siempre'], ['no', 'Nunca']]
+    );
+    this.ajustePlugin(
+      libro, 'Epígrafes',
+      'La cita justo debajo de un titular, a la derecha y más pequeña.',
+      'epigrafes', 'booleano'
+    );
+    this.ajustePlugin(
+      libro, 'Conversaciones',
+      'Chats y teatro (un nombre en negrita y su texto) como un registro.',
+      'conversaciones', 'booleano'
+    );
+    this.ajustePlugin(
+      libro, 'Raya de diálogo pegada',
+      '«—¿No vienes?», como pide el DPD. Solo en la salida.',
+      'rayaPegada', 'booleano'
+    );
+    for (const prop of ['font-family', 'font-size', 'first-line-indent', 'margin-top', 'text-alignment']) {
+      this.control(libro, this.buscar('paragraph-chat', prop));
+    }
+    for (const prop of ['margin-left', 'font-size', 'text-alignment', 'font-slant']) {
+      this.control(libro, this.buscar('block-epigraph', prop));
+    }
   }
 
   seccionAvanzado(cont) {
