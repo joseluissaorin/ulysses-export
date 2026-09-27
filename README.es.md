@@ -22,7 +22,12 @@ diálogo de impresión ni de un navegador, lo compone el propio plugin con
   retocar estilos sin salir de Obsidian.
 - Extensiones prácticas sobre lo que hace Ulysses: sangría francesa
   automática en la bibliografía, modo verso para poemas y diálogo con raya
-  a la española (`— ¿No vienes?`).
+  a la española («—¿No vienes?»).
+- **Composición de libro** (desde la 2.1): láminas a sangre para
+  caligramas e ilustraciones a página completa, capítulos que abren en
+  página impar a doble cara, estrofas que no se parten, conversaciones de
+  chat o de teatro, epígrafes y la raya de diálogo pegada, como pide el
+  DPD. Todo en **[`docs/libro.md`](docs/libro.md)**.
 
 ## El renderizador de PDF
 
@@ -76,6 +81,10 @@ problemas, en **[`docs/guias/`](docs/guias/)**:
 5. **[Usarlo en iPhone y iPad](docs/guias/05-uso-ios.md)**
 6. **[Usarlo en Android](docs/guias/06-uso-android.md)**
 
+Y para novela y poesía: **[Novelas y libros](docs/libro.md)**, con las
+láminas, la doble cara, las conversaciones y las propiedades que cada nota
+puede fijar (`ulysses-estilo`, `ulysses-laminas`…).
+
 ## Instalación
 
 Manual, mientras no esté en el catálogo de plugins de la comunidad:
@@ -105,6 +114,7 @@ estilos distintos, con el `.md` de partida y los PDF resultantes:
 |---|---|---|
 | [`muestra.md`](ejemplos/muestra.md) | Novela (Baskerville, sangrías, `*****`) | [`muestra-novela.pdf`](ejemplos/muestra-novela.pdf) |
 | [`muestra.md`](ejemplos/muestra.md) | Universidad (Optima, justificado, notas al pie) | [`muestra-universidad.pdf`](ejemplos/muestra-universidad.pdf) |
+| [`libro.md`](ejemplos/libro.md) | Novela a doble cara, con lámina, chat, poema y epígrafe | [`muestra-libro.pdf`](ejemplos/muestra-libro.pdf) |
 
 ## Desarrollo
 
@@ -112,7 +122,7 @@ estilos distintos, con el `.md` de partida y los PDF resultantes:
 npm install
 npm run build            # empaqueta a dist/
 npm test                 # pruebas unitarias
-node scripts/exportar.mjs nota.md hoja.ulss salida.pdf   # exportar desde la terminal
+node scripts/exportar.mjs nota.md hoja.ulss salida.pdf   # exportar desde la terminal (también .docx y .html)
 python3 scripts/comparar.py referencia.pdf salida.pdf    # comparar dos PDF línea a línea
 ```
 
@@ -122,6 +132,8 @@ El código está organizado por módulos en `src/`:
 |---|---|
 | `ulss.js` | Parser del formato `.ulss` (variables, mixins, herencia) |
 | `markdown.js` | Markdown → árbol de bloques (con líneas y sangrías) |
+| `libro.js` | Composición de libro: láminas, secciones, poemas, conversaciones, epígrafes, raya |
+| `imagenes.js` | Tamaño de las imágenes (PNG, JPEG, GIF, SVG) sin decodificarlas |
 | `docx.js` | Emisor OOXML |
 | `typst.js` | **Emisor Typst con el modelo de caja de Chromium** |
 | `metricas.js` | Lectura de fuentes (nombres, métricas, avances) |

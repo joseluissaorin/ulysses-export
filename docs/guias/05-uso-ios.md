@@ -66,6 +66,9 @@ reserva (Tinos, Arimo, Cousine) y el plugin te avisa de la sustitución.
    deslizando hacia abajo)*.
 3. Elige **«Exportar con un estilo de Ulysses…»**.
 4. En el diálogo, selecciona el **Estilo** y comprueba **Guardar en**.
+   Si la nota es un libro, revisa la sección **Composición de libro**
+   (láminas, doble cara, epígrafes…; ver
+   **[Novelas y libros](../libro.md)**).
 5. Pulsa **PDF**.
 
 Verás un aviso de «PDF guardado en Exportaciones/…».

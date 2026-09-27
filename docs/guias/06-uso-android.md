@@ -68,7 +68,8 @@ Cousine) y el plugin avisa de la sustitución.
 1. Abre la nota.
 2. Toca el menú **⋮** arriba a la derecha *(o abre la paleta de comandos)*.
 3. **«Exportar con un estilo de Ulysses…»**.
-4. Elige **Estilo** y comprueba **Guardar en**.
+4. Elige **Estilo** y comprueba **Guardar en**. Si la nota es un libro,
+   revisa **Composición de libro** (ver **[Novelas y libros](../libro.md)**).
 5. Pulsa **PDF**.
 
 El archivo queda en la carpeta de salida del vault (por defecto

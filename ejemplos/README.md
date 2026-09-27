@@ -12,12 +12,16 @@ numeradas y de viñetas, cita en bloque, divisor y una nota al pie.
 | `estilos/Universidad.ulss` | Estilo académico (Optima, notas al pie, número de página) |
 | `muestra-novela.pdf` | La nota exportada con Novela |
 | `muestra-universidad.pdf` | La nota exportada con Universidad |
+| `libro.md` | Una pieza breve para la composición de libro: epígrafe, diálogo, una lámina, un chat y un poema |
+| `faro.png` | El caligrama de `libro.md`: un A4 apaisado a 150 ppp, que el plugin reconoce como lámina |
+| `muestra-libro.pdf` | `libro.md` exportado con Novela, a doble cara y con la lámina girada |
 
 Para regenerarlos desde la terminal:
 
 ```bash
 node scripts/exportar.mjs ejemplos/muestra.md ejemplos/estilos/Novela.ulss ejemplos/muestra-novela.pdf
 node scripts/exportar.mjs ejemplos/muestra.md ejemplos/estilos/Universidad.ulss ejemplos/muestra-universidad.pdf
+node scripts/exportar.mjs ejemplos/libro.md ejemplos/estilos/Novela.ulss ejemplos/muestra-libro.pdf
 ```
 
 (Hace falta tener las tipografías correspondientes instaladas; si no las

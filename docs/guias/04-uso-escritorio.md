@@ -16,7 +16,11 @@
    | **Estilo** | La hoja `.ulss` con la que se compone. El lápiz de al lado abre el editor. |
    | **Mostrar todos los estilos** | Solo para esta vez; enseña también los que tengas ocultos. |
    | **Tamaño de página** | A4, Carta u Oficio. **Se ignora si el estilo declara el suyo** (Keynote 16:9, por ejemplo). |
+   | **Composición de libro** | Láminas, imprimir a doble cara, epígrafes, conversaciones y raya de diálogo, solo para esta exportación (ver abajo). |
    | **Guardar en** | Carpeta del vault donde va el archivo. |
+
+   Si la nota lleva la propiedad `ulysses-estilo`, el diálogo propone ese
+   estilo.
 
 4. Pulsa el botón del formato que quieras:
 
@@ -34,6 +38,23 @@ Si ya existe uno con ese nombre, se añade un número: `Mango 2.pdf`.
 > del plugin y es el que funciona igual en el móvil. *Imprimir…* usa el
 > motor del sistema; se mantiene por comodidad (para mandar a una
 > impresora de verdad), y produce un resultado equivalente.
+
+### Composición de libro
+
+La sección del diálogo para novela, poesía y todo lo que se vaya a
+imprimir como libro. Todo está explicado en
+**[Novelas y libros](../libro.md)**; en corto:
+
+| Opción | Qué hace |
+|---|---|
+| **Láminas** | Una imagen con la proporción de la página va sola, a sangre, en su página. Si es apaisada y el libro vertical: **girada** (por defecto, como en imprenta), en **página apaisada** (para pantalla) o **ninguna** (todas las imágenes en el texto). |
+| **Imprimir a doble cara** | Márgenes en espejo y cada capítulo en página impar, con una blanca delante si hace falta. Viene con lo que diga el estilo (`two-sided`). |
+| **Epígrafes** | La cita justo debajo de un titular, a la derecha y más pequeña. Desactivado salvo que la nota lo pida. |
+| **Conversaciones** | Chats y teatro (un nombre en negrita y su texto) como un registro. |
+| **Raya de diálogo pegada** | «—¿No vienes?», como pide el DPD. |
+
+Cuando una opción viene fijada por las propiedades de la nota, el diálogo
+lo dice debajo.
 
 ---
 
@@ -63,6 +84,15 @@ Si ya existe uno con ese nombre, se añade un número: `Mango 2.pdf`.
 | **Títulos de bibliografía** | Los titulares que activan la sangría francesa de referencias. |
 | **Incluir comentarios** | Saca también los bloques `%% … %%` de Obsidian. |
 
+### Libro
+
+Los valores por defecto de la *Composición de libro*: **Láminas**,
+**Doble cara** (lo que diga el estilo, siempre o nunca), **Epígrafes**,
+**Conversaciones** y **Raya de diálogo pegada**. Cada nota puede fijar los
+suyos en sus propiedades (`ulysses-laminas`, `ulysses-doble-cara`,
+`ulysses-epigrafes`…); la lista completa está en
+**[Novelas y libros](../libro.md)**.
+
 #### «Líneas dentro de un párrafo», en detalle
 
 Es el ajuste que más cambia el resultado en textos literarios:
@@ -88,15 +118,20 @@ Es el ajuste que más cambia el resultado en textos literarios:
 | `> cita` | Cita en bloque |
 | `- viñeta` / `1. numerada` | Listas, con anidado |
 | `\| tabla \|` | Tablas, con alineación por columna |
-| `![[imagen.png]]` o `![alt](ruta)` | Imágenes (con su pie si hay `alt`) |
+| `![[imagen.png]]` o `![alt](ruta)` | Imágenes (con su pie si hay `alt`); las que tienen la proporción de la página, como **lámina** a sangre |
+| `![[imagen.png\|300]]`, `\|página`, `\|texto`, `\|girada` | Ancho en píxeles y control de la lámina |
 | `texto[^1]` y `[^1]: nota` | Notas al pie |
 | `***` | El divisor que defina el estilo (línea, `*****`, salto de página…) |
 | `[[Enlace interno]]` | Su texto (o el alias) |
 | `%% comentario %%` | Oculto, salvo que el estilo o los ajustes digan lo contrario |
-| `— Diálogo` | Diálogo a la española: raya al margen y vuelta alineada |
+| `— Diálogo` | Diálogo a la española: raya al margen, pegada al parlamento, y vuelta alineada |
 | Líneas con tabulaciones | Verso, respetando la sangría de cada línea |
+| `**Nombre** texto` en varios párrafos seguidos | Conversación (chat o teatro), compuesta como un registro |
+| `> cita` justo debajo de un titular | Epígrafe, si están activados |
 
-El *frontmatter* (`---` al principio) se ignora.
+Del *frontmatter* (`---` al principio) solo se leen las propiedades que
+empiezan por `ulysses-`: son los ajustes de esa nota (ver
+**[Novelas y libros](../libro.md)**). Lo demás se ignora.
 
 ---
 
@@ -137,6 +172,20 @@ Manda el estilo. Cambia `page-width`/`page-height` en su
 
 **Los versos salen unidos**
 Cambia *Líneas dentro de un párrafo* a **Siempre verso**.
+
+**Los capítulos salen seguidos**
+El estilo decide dónde empieza página nueva (`section-break`). Con
+`heading-2`, abren página los titulares de nivel 1 y 2; con `heading-1`,
+solo los de nivel 1.
+
+**Salen páginas en blanco antes de los capítulos**
+El estilo es a doble cara (`two-sided: yes`) y cada capítulo empieza en
+página impar. Si no vas a imprimir a doble cara, apaga **Imprimir a doble
+cara** en el diálogo.
+
+**Una imagen no sale en el PDF**
+El PDF admite PNG, JPEG, GIF y SVG. Una WebP se deja fuera con un aviso:
+conviértela.
 
 **Quiero ver los comentarios `%%`**
 Actívalo en *Incluir comentarios*, o pon `visibility: visible` en
