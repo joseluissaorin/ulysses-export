@@ -17,7 +17,7 @@
  *   {tipo:'divider'}
  *   {tipo:'list', ordenada, items:[{bloques}]}
  *   {tipo:'table', cabecera:[celdas], filas:[[celdas]], alineaciones}
- *   {tipo:'figure', ruta, alt, titulo}
+ *   {tipo:'figure', ruta, alt, titulo, ancho?, alto?, lamina?, orientacion?}
  *   {tipo:'comment', texto}          // %% ... %% de Obsidian
  *
  * Inline:
@@ -25,9 +25,14 @@
  *   {tipo:'strong'|'em'|'del'|'mark'|'code', hijos|valor}
  *   {tipo:'link', destino, hijos}
  *   {tipo:'wikilink', destino, alias}
- *   {tipo:'image', ruta, alt}
+ *   {tipo:'image', ruta, alt, ancho?, alto?, lamina?, orientacion?}
  *   {tipo:'footnote', id}
  *   {tipo:'salto'}
+ *
+ * Las opciones de imagen salen de lo que Obsidian admite tras la barra:
+ * «![[foto.png|300]]» o «|300x200» fijan el tamaño en píxeles, y el
+ * plugin añade sus palabras: «página»/«lámina» (a página completa),
+ * «texto» (nunca como lámina), «girada» y «apaisada» (orientación).
  */
 
 /* ------------------------------------------------------------------ *
@@ -43,6 +48,98 @@ function separarFrontmatter(texto) {
     frontmatter: texto.slice(3, fin).trim(),
     cuerpo: salto === -1 ? '' : texto.slice(salto + 1),
   };
+}
+
+/**
+ * Propiedades de la nota: el YAML plano que Obsidian escribe en su panel
+ * («clave: valor», listas con guion o entre corchetes). No pretende ser
+ * un YAML completo; en el plugin manda la caché de Obsidian, y esto
+ * sirve para la terminal.
+ */
+function leerPropiedades(frontmatter) {
+  const props = Object.create(null);
+  if (!frontmatter) return props;
+  const escalar = (v) => {
+    const s = String(v).trim();
+    if (/^(["']).*\1$/.test(s)) return s.slice(1, -1);
+    if (/^(true|sí|si|yes)$/i.test(s)) return true;
+    if (/^(false|no)$/i.test(s)) return false;
+    if (/^-?\d+(\.\d+)?$/.test(s)) return Number(s);
+    return s;
+  };
+  let lista = null;
+  for (const linea of frontmatter.split('\n')) {
+    const item = /^\s+-\s+(.*)$/.exec(linea);
+    if (item && lista) {
+      lista.push(escalar(item[1]));
+      continue;
+    }
+    const m = /^([^\s:#][^:]*):\s*(.*)$/.exec(linea);
+    if (!m) continue;
+    const clave = m[1].trim();
+    const valor = m[2].trim();
+    lista = null;
+    if (!valor) {
+      lista = props[clave] = [];
+    } else if (/^\[.*\]$/.test(valor)) {
+      props[clave] = valor.slice(1, -1).split(',').map((x) => escalar(x)).filter((x) => x !== '');
+    } else {
+      props[clave] = escalar(valor);
+    }
+  }
+  return props;
+}
+
+/* ------------------------------------------------------------------ *
+ * Opciones de imagen
+ * ------------------------------------------------------------------ */
+
+const sinTildes = (s) => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+
+const PALABRAS_IMAGEN = {
+  pagina: { lamina: 'si' }, lamina: { lamina: 'si' }, page: { lamina: 'si' },
+  full: { lamina: 'si' }, 'pagina completa': { lamina: 'si' }, 'a sangre': { lamina: 'si' },
+  texto: { lamina: 'no' }, text: { lamina: 'no' }, inline: { lamina: 'no' },
+  'en linea': { lamina: 'no' }, 'sin lamina': { lamina: 'no' }, nolamina: { lamina: 'no' },
+  girada: { orientacion: 'girada' }, rotada: { orientacion: 'girada' }, rotate: { orientacion: 'girada' },
+  rotated: { orientacion: 'girada' },
+  apaisada: { orientacion: 'apaisada' }, landscape: { orientacion: 'apaisada' },
+  horizontal: { orientacion: 'apaisada' },
+};
+
+/**
+ * Reparte lo que va tras la barra de una imagen entre tamaño, palabras
+ * del plugin y texto alternativo. «Mapa de la casa|300» da un pie y un
+ * ancho; «página|girada» fuerza una lámina girada.
+ */
+function opcionesDeImagen(alias, primeroEsAlt) {
+  const r = { alt: '' };
+  if (alias === undefined || alias === null) return r;
+  const libres = [];
+  String(alias).split('|').forEach((trozo, k) => {
+    const t = trozo.trim();
+    if (!t) return;
+    // En «![alt|300](ruta)» el primer trozo es el texto alternativo, diga
+    // lo que diga: «![Página](scan.png)» no es una lámina forzada.
+    if (primeroEsAlt && k === 0) {
+      libres.push(t);
+      return;
+    }
+    const tam = /^(\d+)(?:\s*x\s*(\d+))?$/i.exec(t);
+    if (tam) {
+      r.ancho = Number(tam[1]);
+      if (tam[2]) r.alto = Number(tam[2]);
+      return;
+    }
+    const palabra = PALABRAS_IMAGEN[sinTildes(t)];
+    if (palabra) {
+      Object.assign(r, palabra);
+      return;
+    }
+    libres.push(t);
+  });
+  r.alt = libres.join(' | ');
+  return r;
 }
 
 /* ------------------------------------------------------------------ *
@@ -65,6 +162,16 @@ function analizarInline(texto) {
   while (i < n) {
     const c = texto[i];
 
+    // Fin de línea dentro del párrafo: salto duro. Llega aquí porque el
+    // párrafo se analiza entero, para que una cursiva pueda abarcar
+    // varios versos como en Obsidian.
+    if (c === '\n') {
+      volcar();
+      nodos.push({ tipo: 'salto' });
+      i++;
+      continue;
+    }
+
     // Escape
     if (c === '\\' && i + 1 < n) {
       buffer += texto[i + 1];
@@ -86,12 +193,12 @@ function analizarInline(texto) {
       }
     }
 
-    // Imagen  ![alt](ruta)
+    // Imagen  ![alt](ruta)  (Obsidian admite también «![alt|300](ruta)»)
     if (c === '!' && texto[i + 1] === '[') {
       const m = /^!\[([^\]]*)\]\(([^)]*)\)/.exec(texto.slice(i));
       if (m) {
         volcar();
-        nodos.push({ tipo: 'image', alt: m[1], ruta: m[2].trim() });
+        nodos.push(Object.assign({ tipo: 'image', ruta: m[2].trim() }, opcionesDeImagen(m[1], true)));
         i += m[0].length;
         continue;
       }
@@ -104,11 +211,12 @@ function analizarInline(texto) {
         volcar();
         const dentro = texto.slice(i + 3, cierre);
         const barra = dentro.indexOf('|');
-        nodos.push({
-          tipo: 'image',
-          ruta: (barra === -1 ? dentro : dentro.slice(0, barra)).trim(),
-          alt: barra === -1 ? '' : dentro.slice(barra + 1).trim(),
-        });
+        nodos.push(
+          Object.assign(
+            { tipo: 'image', ruta: (barra === -1 ? dentro : dentro.slice(0, barra)).trim() },
+            opcionesDeImagen(barra === -1 ? '' : dentro.slice(barra + 1))
+          )
+        );
         i = cierre + 2;
         continue;
       }
@@ -172,6 +280,11 @@ function analizarInline(texto) {
       // espacio, o «2 * 3 * 4» se leeria como cursiva.
       const siguiente = texto[i + par.marca.length];
       if (siguiente === undefined || /\s/.test(siguiente)) continue;
+      // Y, como en CommonMark (y en Obsidian), el guion bajo no abre
+      // dentro de una palabra: «mi_tesis.docx» es texto. Importa más
+      // ahora que el párrafo se analiza entero y un «_» podría emparejarse
+      // con otro de una línea posterior.
+      if (par.marca[0] === '_' && i > 0 && ALFANUMERICO.test(texto[i - 1])) continue;
       const cierre = buscarCierre(texto, i + par.marca.length, par.marca);
       if (cierre === -1) continue;
       volcar();
@@ -195,6 +308,8 @@ function analizarInline(texto) {
   return nodos;
 }
 
+const ALFANUMERICO = /[\p{L}\p{N}]/u;
+
 /** Busca la marca de cierre respetando los escapes y el codigo inline. */
 function buscarCierre(texto, desde, marca) {
   let i = desde;
@@ -211,6 +326,11 @@ function buscarCierre(texto, desde, marca) {
     if (texto.startsWith(marca, i)) {
       if (i === desde) return -1;              // marca vacia
       if (/\s/.test(texto[i - 1])) {          // «a * b»: no cierra
+        i++;
+        continue;
+      }
+      // «_» seguido de letra o número tampoco cierra («notas_finales»)
+      if (marca[0] === '_' && ALFANUMERICO.test(texto[i + marca.length] || '')) {
         i++;
         continue;
       }
@@ -394,18 +514,35 @@ function analizarBloques(texto) {
       // Un parrafo que es solo una imagen se convierte en figura
       const unaImagen = parrafo.length === 1 && analizarInline(parrafo[0].texto);
       if (unaImagen && unaImagen.length === 1 && unaImagen[0].tipo === 'image') {
-        bloques.push({ tipo: 'figure', ruta: unaImagen[0].ruta, alt: unaImagen[0].alt });
+        const img = Object.assign({}, unaImagen[0]);
+        delete img.tipo;
+        bloques.push(Object.assign({ tipo: 'figure' }, img));
       } else {
-        const conSaltos = [];
-        const detalle = parrafo.map((l, idx) => {
-          const hijos = analizarInline(l.texto);
-          conSaltos.push(...hijos);
-          if (idx < parrafo.length - 1) conSaltos.push({ tipo: 'salto' });
-          return { hijos, tabs: l.tabs, espacios: l.espacios, texto: l.texto };
-        });
+        // El párrafo se analiza entero y después se reparte en líneas:
+        // así una cursiva que abarca varios versos se cierra donde toca
+        // y no deja los «_» a la vista. Si el reparto no cuadra (un
+        // código en línea que cruza el salto), se vuelve al análisis
+        // línea a línea de siempre.
+        const plano = analizarInline(parrafo.map((l) => l.texto).join('\n'));
+        let porLineas = partirEnLineas(plano);
+        let hijos = plano;
+        if (porLineas.length !== parrafo.length) {
+          porLineas = parrafo.map((l) => analizarInline(l.texto));
+          hijos = [];
+          porLineas.forEach((h, idx) => {
+            hijos.push(...h);
+            if (idx < porLineas.length - 1) hijos.push({ tipo: 'salto' });
+          });
+        }
+        const detalle = parrafo.map((l, idx) => ({
+          hijos: porLineas[idx],
+          tabs: l.tabs,
+          espacios: l.espacios,
+          texto: l.texto,
+        }));
         bloques.push({
           tipo: 'paragraph',
-          hijos: conSaltos, // vista plana, con saltos duros
+          hijos, // vista plana, con saltos duros
           lineas: detalle, // vista por lineas, con su sangria
         });
       }
@@ -413,6 +550,32 @@ function analizarBloques(texto) {
   }
 
   return { bloques, notas };
+}
+
+/** Nodos que envuelven a otros y que pueden abarcar varias líneas. */
+const ENVOLTORIOS = new Set(['strong', 'em', 'del', 'mark', 'link']);
+
+/**
+ * Reparte un árbol inline en líneas por sus saltos. Un envoltorio que
+ * cruza un salto se duplica a cada lado: «_a⏎b_» da «_a_» y «_b_».
+ */
+function partirEnLineas(nodos) {
+  const lineas = [[]];
+  for (const nodo of nodos || []) {
+    if (nodo.tipo === 'salto') {
+      lineas.push([]);
+      continue;
+    }
+    if (ENVOLTORIOS.has(nodo.tipo) && nodo.hijos) {
+      partirEnLineas(nodo.hijos).forEach((trozo, k) => {
+        if (k > 0) lineas.push([]);
+        if (trozo.length) lineas[lineas.length - 1].push(Object.assign({}, nodo, { hijos: trozo }));
+      });
+      continue;
+    }
+    lineas[lineas.length - 1].push(nodo);
+  }
+  return lineas;
 }
 
 function analizarLista(lineas, inicio) {
@@ -474,7 +637,7 @@ function analizarLista(lineas, inicio) {
 function analizar(texto) {
   const { frontmatter, cuerpo } = separarFrontmatter(texto);
   const { bloques, notas } = analizarBloques(cuerpo);
-  return { frontmatter, bloques, notas };
+  return { frontmatter, propiedades: leerPropiedades(frontmatter), bloques, notas };
 }
 
 /** Texto plano de una lista de nodos inline (para titulos, alt, etc.). */
@@ -489,4 +652,14 @@ function aTextoPlano(nodos) {
   return s;
 }
 
-module.exports = { analizar, analizarInline, analizarBloques, separarFrontmatter, aTextoPlano };
+module.exports = {
+  analizar,
+  analizarInline,
+  analizarBloques,
+  separarFrontmatter,
+  aTextoPlano,
+  leerPropiedades,
+  opcionesDeImagen,
+  partirEnLineas,
+  sinTildes,
+};

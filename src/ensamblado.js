@@ -7,6 +7,7 @@
 const D = require('./docx.js');
 const MD = require('./markdown.js');
 const ULSS = require('./ulss.js');
+const LIBRO = require('./libro.js');
 
 const MM = 72 / 25.4;
 // Ulysses redondea A4 a puntos enteros: 595 x 842 pt (11900 x 16840
@@ -43,6 +44,9 @@ function ajustesPagina(hoja, tamano) {
     interior: hoja.puntos(s, 'page-inset-inner', 12, 25 * MM),
     exterior: hoja.puntos(s, 'page-inset-outer', 12, 25 * MM),
     dosCaras: hoja.bandera(s, 'two-sided', false),
+    // «left»: se encuaderna por la izquierda (lo normal); con doble cara,
+    // el margen interior va a la izquierda en las impares.
+    encuadernacion: hoja.palabra(s, 'page-binding', 'left') === 'right' ? 'right' : 'left',
     saltoSeccion: hoja.palabra(s, 'section-break', null),
     columnas: Math.max(1, Math.round(hoja.puntos(s, 'column-count', 12, 1))),
     separacionColumnas: hoja.puntos(s, 'column-spacing-width', 12, 0),
@@ -131,7 +135,8 @@ function sangriaDeLinea(linea, unidad) {
 function modoDeLineas(bloque, opc) {
   const modo = (opc && opc.modoLineas) || 'auto';
   const lineas = bloque.lineas || [];
-  if (lineas.length <= 1) return 'parrafo';
+  // Un verso suelto dentro de un poema (ver libro.js) es verso.
+  if (lineas.length <= 1) return bloque.versoSuelto ? 'verso' : 'parrafo';
   if (modo !== 'auto') return modo;
   const haySangria = lineas.some((l) => l.tabs || l.espacios);
   const todasCortas = lineas.every((l) => (l.texto || '').length <= 60);
@@ -256,12 +261,38 @@ function construirDocx(documento, hoja, opciones) {
   const opc = opciones || {};
   const pagina = ajustesPagina(hoja, opc.tamanoPagina);
   const base = D.atributosBase(hoja);
+  // Láminas, poemas, conversaciones, epígrafes y raya (ver libro.js).
+  documento = LIBRO.preparar(documento, hoja, opc);
+  const dosCaras = LIBRO.dobleCara(pagina, opc);
+  const saltoSeccion = LIBRO.saltoDeSeccion(pagina.saltoSeccion);
+  // Word solo distingue la primera página de cada SECCIÓN, así que las
+  // aperturas de capítulo son secciones de verdad cuando hace falta: a
+  // doble cara (empiezan en impar) o si el estilo quita el pie de la
+  // primera página de cada sección. Si no, basta con un salto de página.
+  const seccionesReales = dosCaras || pagina.piePrimeraPagina === 'none';
+  const anchoUtil = pagina.ancho - pagina.interior - pagina.exterior;
+  const altoUtil = pagina.alto - pagina.superior - pagina.inferior;
 
   const relaciones = [];
   const medios = [];
   const notas = [];
   let siguienteRel = 10;
   let siguienteNota = 2; // 0 y 1 los reserva Word
+  let siguienteDibujo = 1;
+
+  /** Guarda la imagen en el paquete y devuelve su relación. */
+  function registrarMedio(recurso) {
+    const id = `rId${siguienteRel++}`;
+    const nombre = `media/imagen${medios.length + 1}.${recurso.extension || 'png'}`;
+    medios.push({ nombre, datos: recurso.datos, extension: recurso.extension || 'png' });
+    relaciones.push({
+      id,
+      tipo: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image',
+      destino: nombre,
+      externo: false,
+    });
+    return id;
+  }
 
   const ctx = {
     hoja,
@@ -284,31 +315,26 @@ function construirDocx(documento, hoja, opciones) {
       notas.push({ num, contenido });
       return num;
     },
-    imagen(ruta, alt) {
+    imagen(ruta, alt, nodo) {
       if (!opc.recursos) return null;
       const recurso = opc.recursos(ruta);
       if (!recurso || !recurso.datos) return null;
 
-      const id = `rId${siguienteRel++}`;
-      const nombre = `media/imagen${medios.length + 1}.${recurso.extension || 'png'}`;
-      medios.push({ nombre, datos: recurso.datos, extension: recurso.extension || 'png' });
-      relaciones.push({
-        id,
-        tipo: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image',
-        destino: nombre,
-        externo: false,
-      });
+      const id = registrarMedio(recurso);
 
-      const anchoUtil = pagina.ancho - pagina.interior - pagina.exterior;
-      let ancho = recurso.ancho || anchoUtil;
-      let alto = recurso.alto || anchoUtil * 0.75;
-      if (ancho > anchoUtil) {
-        alto = (alto * anchoUtil) / ancho;
-        ancho = anchoUtil;
-      }
+      // Tamaño natural (px a 96 ppp) o el que pida «|300», sin pasar del
+      // ancho ni del alto de la caja de texto.
+      const natW = recurso.ancho || (recurso.anchoPx ? recurso.anchoPx * 0.75 : null);
+      const natH = recurso.alto || (recurso.altoPx ? recurso.altoPx * 0.75 : null);
+      const proporcion = natW && natH ? natH / natW : 0.75;
+      let ancho = nodo && nodo.ancho ? nodo.ancho * 0.75 : natW || anchoUtil;
+      if (nodo && nodo.ancho && nodo.alto) ancho = Math.min(ancho, (nodo.alto * 0.75) / proporcion);
+      if (ancho > anchoUtil) ancho = anchoUtil;
+      if (ancho * proporcion > altoUtil * 0.98) ancho = (altoUtil * 0.98) / proporcion;
+      const alto = ancho * proporcion;
       const cx = Math.round(ancho * D.PT_A_EMU);
       const cy = Math.round(alto * D.PT_A_EMU);
-      const n = medios.length;
+      const n = siguienteDibujo++;
 
       return (
         `<w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0">` +
@@ -333,6 +359,207 @@ function construirDocx(documento, hoja, opciones) {
     const ctxLocal = Object.assign({}, ctx, { atributos: atrs });
     const runs = D.corridas(nodos, ctxLocal, null);
     cuerpo.push(`<w:p>${pPr}${runs.join('')}</w:p>`);
+  }
+
+  /* --- secciones de Word --- */
+
+  // Numeración: si la primera numerada es la 2 con el numero 1, la
+  // primera hoja tiene que llevar el 0 y quedar oculta con «titlePg».
+  const desde = Math.max(1, Math.round(opc.desdePagina || 1));
+  const inicial = opc.numeroInicial === undefined ? 1 : Math.round(opc.numeroInicial);
+  // Word solo sabe distinguir la PRIMERA pagina, y no admite numeros
+  // negativos: con «desde» mayor que 2 el DOCX no puede reproducirlo del
+  // todo, aunque la previsualizacion si.
+  const arranque = Math.max(0, inicial - (desde - 1));
+  const conFolio = pagina.piePagina === 'page-number';
+
+  function seccionNormal(tipo, primera, continua) {
+    // Encuadernación por la derecha a doble cara: el interior de las
+    // impares va a la derecha. Con «mirrorMargins», Word pone el margen
+    // izquierdo en el interior de las impares, así que se intercambian.
+    const invertir = dosCaras && pagina.encuadernacion === 'right';
+    return {
+      tipo, // null (la primera), 'nextPage' u 'oddPage'
+      primera: !!primera,
+      // Tras una lámina el texto sigue la misma sección de Ulysses: su
+      // primera página no es «:first-page» y lleva folio.
+      continua: !!continua,
+      ancho: pagina.ancho,
+      alto: pagina.alto,
+      margenes: {
+        sup: pagina.superior, inf: pagina.inferior,
+        der: invertir ? pagina.interior : pagina.exterior,
+        izq: invertir ? pagina.exterior : pagina.interior,
+        cab: pagina.distanciaEncabezado, pie: pagina.distanciaPie,
+      },
+      columnas: true,
+      sinPie: false,
+      inicio: cuerpo.length,
+    };
+  }
+
+  function seccionLamina(ancho, alto) {
+    return {
+      tipo: 'nextPage', primera: false, ancho, alto,
+      margenes: { sup: 0, der: 0, inf: 0, izq: 0, cab: 0, pie: 0 },
+      columnas: false, sinPie: true, inicio: cuerpo.length,
+    };
+  }
+
+  /**
+   * ¿La primera página de esta sección va sin folio? Ojo: Word decide
+   * si una página es par o impar por su número, no por su posición; con
+   * doble cara y «Primera página numerada» mayor que 1 el DOCX puede
+   * reflejar al revés que el PDF.
+   */
+  function primeraSinFolio(s) {
+    if (s.continua) return false;
+    if (pagina.piePrimeraPagina === 'none') return true;
+    return s.primera && desde > 1;
+  }
+
+  // Orden del esquema (CT_SectPr): referencias, tipo, pgSz, pgMar,
+  // pgNumType, cols, titlePg.
+  function sectPrXml(s) {
+    const refs = [];
+    if (conFolio) {
+      if (s.sinPie) {
+        refs.push('<w:footerReference w:type="default" r:id="rId9"/>');
+      } else {
+        refs.push('<w:footerReference w:type="default" r:id="rId7"/>');
+        if (primeraSinFolio(s)) refs.push('<w:footerReference w:type="first" r:id="rId9"/>');
+      }
+    }
+    const m = s.margenes;
+    const cols =
+      s.columnas && pagina.columnas > 1
+        ? `<w:cols w:num="${pagina.columnas}" w:space="${D.twips(pagina.separacionColumnas)}"/>`
+        : '<w:cols w:space="708"/>';
+    return (
+      '<w:sectPr>' +
+      refs.join('') +
+      (s.tipo ? `<w:type w:val="${s.tipo}"/>` : '') +
+      `<w:pgSz w:w="${D.twips(s.ancho)}" w:h="${D.twips(s.alto)}"${s.ancho > s.alto ? ' w:orient="landscape"' : ''}/>` +
+      `<w:pgMar w:top="${D.twips(m.sup)}" w:right="${D.twips(m.der)}"` +
+      ` w:bottom="${D.twips(m.inf)}" w:left="${D.twips(m.izq)}"` +
+      ` w:header="${D.twips(m.cab)}" w:footer="${D.twips(m.pie)}" w:gutter="0"/>` +
+      (s.primera ? `<w:pgNumType w:start="${arranque}"/>` : '') +
+      cols +
+      (!s.sinPie && conFolio && primeraSinFolio(s) ? '<w:titlePg/>' : '') +
+      '</w:sectPr>'
+    );
+  }
+
+  /**
+   * Cierra la sección en curso. Tras una lámina, su sectPr va en el
+   * párrafo de la propia lámina. Tras texto, va en un párrafo propio de
+   * un punto de alto: Word justifica la última línea del párrafo que
+   * lleva el salto de sección y la estiraba de margen a margen.
+   */
+  let ultimaAdjunta = null;
+  let ultimoEsLamina = false;
+  function adjuntarSeccion(sectPr) {
+    if (!ultimoEsLamina) {
+      cuerpo.push(
+        `<w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="20" w:lineRule="exact"/>` +
+          `<w:rPr><w:sz w:val="2"/><w:szCs w:val="2"/></w:rPr>${sectPr}</w:pPr></w:p>`
+      );
+      ultimaAdjunta = { i: cuerpo.length - 1, antes: null };
+      return true;
+    }
+    for (let i = cuerpo.length - 1; i >= 0; i--) {
+      const s = cuerpo[i];
+      if (!s) continue;
+      let nuevo = null;
+      if (s.endsWith('<w:p/>')) {
+        nuevo = s.slice(0, -6) + `<w:p><w:pPr>${sectPr}</w:pPr></w:p>`;
+      } else {
+        const ini = s.lastIndexOf('<w:p>');
+        if (ini === -1) continue;
+        if (s.startsWith('<w:pPr>', ini + 5)) {
+          const cierre = s.indexOf('</w:pPr>', ini);
+          nuevo = s.slice(0, cierre) + sectPr + s.slice(cierre);
+        } else {
+          nuevo = s.slice(0, ini + 5) + `<w:pPr>${sectPr}</w:pPr>` + s.slice(ini + 5);
+        }
+      }
+      ultimaAdjunta = { i, antes: s };
+      cuerpo[i] = nuevo;
+      return true;
+    }
+    return false;
+  }
+
+  let seccionActual = seccionNormal(null, true);
+  let seccionPrevia = null;
+  function abrirSeccion(nueva) {
+    if (cuerpo.length === seccionActual.inicio) {
+      // La sección en curso aún no tiene nada: la nueva ocupa su sitio.
+      if (seccionActual.primera) {
+        nueva.primera = true;
+        nueva.tipo = null;
+      } else if (seccionActual.tipo === 'oddPage' && nueva.tipo === 'nextPage') {
+        nueva.tipo = 'oddPage';
+      }
+    } else if (adjuntarSeccion(sectPrXml(seccionActual))) {
+      seccionPrevia = seccionActual;
+    }
+    nueva.inicio = cuerpo.length;
+    seccionActual = nueva;
+  }
+
+  /**
+   * Lámina: la imagen anclada a la página, detrás del texto, en una
+   * sección propia sin márgenes ni pie. Girada 90° (arriba del dibujo a
+   * la izquierda) o en página apaisada, como en el PDF.
+   */
+  function laminaXml(b, recurso, pagW, pagH, girada) {
+    const id = registrarMedio(recurso);
+    const n = siguienteDibujo++;
+    const emu = (pt) => Math.round(pt * D.PT_A_EMU);
+    // Marco sin girar: la página, o la página tumbada si se gira la imagen.
+    let fw = girada ? pagH : pagW;
+    let fh = girada ? pagW : pagH;
+    const iw = b.anchoPx || recurso.anchoPx || (recurso.ancho ? recurso.ancho / 0.75 : 0);
+    const ih = b.altoPx || recurso.altoPx || (recurso.alto ? recurso.alto / 0.75 : 0);
+    let recorte = '';
+    if (iw && ih) {
+      const ar = iw / ih;
+      const af = fw / fh;
+      if (b.encaje === 'cover') {
+        if (ar > af) {
+          const c = Math.round(((1 - af / ar) / 2) * 100000);
+          if (c > 0) recorte = `<a:srcRect l="${c}" r="${c}"/>`;
+        } else if (ar < af) {
+          const c = Math.round(((1 - ar / af) / 2) * 100000);
+          if (c > 0) recorte = `<a:srcRect t="${c}" b="${c}"/>`;
+        }
+      } else if (ar > af) {
+        fh = fw / ar;
+      } else {
+        fw = fh * ar;
+      }
+    }
+    // Word gira alrededor del centro del marco: se centra en la página.
+    const ox = (pagW - fw) / 2;
+    const oy = (pagH - fh) / 2;
+    return (
+      `<w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="240" w:lineRule="auto"/></w:pPr><w:r><w:drawing>` +
+      `<wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="251658240" behindDoc="1" locked="1" layoutInCell="1" allowOverlap="1">` +
+      `<wp:simplePos x="0" y="0"/>` +
+      `<wp:positionH relativeFrom="page"><wp:posOffset>${emu(ox)}</wp:posOffset></wp:positionH>` +
+      `<wp:positionV relativeFrom="page"><wp:posOffset>${emu(oy)}</wp:posOffset></wp:positionV>` +
+      `<wp:extent cx="${emu(fw)}" cy="${emu(fh)}"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:wrapNone/>` +
+      `<wp:docPr id="${n}" name="Lámina ${n}" descr="${D.esc(b.alt || '')}"/><wp:cNvGraphicFramePr/>` +
+      `<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">` +
+      `<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">` +
+      `<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">` +
+      `<pic:nvPicPr><pic:cNvPr id="${n}" name="Lámina ${n}"/><pic:cNvPicPr/></pic:nvPicPr>` +
+      `<pic:blipFill><a:blip r:embed="${id}"/>${recorte}<a:stretch><a:fillRect/></a:stretch></pic:blipFill>` +
+      `<pic:spPr><a:xfrm${girada ? ' rot="16200000"' : ''}><a:off x="0" y="0"/><a:ext cx="${emu(fw)}" cy="${emu(fh)}"/></a:xfrm>` +
+      `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>` +
+      `</pic:pic></a:graphicData></a:graphic></wp:anchor></w:drawing></w:r></w:p>`
+    );
   }
 
   let hayContenido = false;
@@ -377,7 +604,11 @@ function construirDocx(documento, hoja, opciones) {
     let indiceParrafo = 0;
     let trasTitular = false;
 
-    bloques.forEach((bloque) => {
+    const esVerso = (x) =>
+      !!x && x.tipo === 'paragraph' && !x.chat && !bloqueEsDialogo(x, opc) &&
+      modoDeLineas(x, opc) === 'verso' && ((x.lineas || []).length > 1 || !!x.versoSuelto);
+
+    bloques.forEach((bloque, idx) => {
       if (bloque.tipo === 'paragraph') bloque.trasTitular = trasTitular;
       const sels = selectoresDe(bloque, bloque.tipo === 'paragraph' ? indiceParrafo : 0);
       const atrs = D.atributos(hoja, sels, Object.assign({}, base));
@@ -394,11 +625,13 @@ function construirDocx(documento, hoja, opciones) {
 
       switch (bloque.tipo) {
         case 'heading': {
-          // «section-break: heading-1» hace que cada titular de ese nivel
-          // arranque en pagina nueva, salvo el que abre el documento.
-          const abreSeccion =
-            pagina.saltoSeccion === `heading-${bloque.nivel}` && hayContenido && !dentroDeCita;
-          if (abreSeccion) atrs.saltoPagina = 'before';
+          // «section-break: heading-N»: ese nivel y todos los superiores
+          // arrancan sección, salvo el titular que abre el documento. A
+          // doble cara la sección empieza en impar (una sección de Word
+          // de tipo «oddPage»); si no, basta un salto de página.
+          const abre = LIBRO.abreSeccion(saltoSeccion, bloque) && hayContenido && !dentroDeCita;
+          if (abre && seccionesReales) abrirSeccion(seccionNormal(dosCaras ? 'oddPage' : 'nextPage'));
+          else if (abre) atrs.saltoPagina = 'before';
           parrafo(bloque.hijos, atrs, {
             keepNext: true,
             pStyle: nombreEstilo(hoja, sels, estiloDe(bloque)),
@@ -409,10 +642,58 @@ function construirDocx(documento, hoja, opciones) {
           break;
         }
 
+        case 'lamina': {
+          const recurso = opc.recursos && opc.recursos(bloque.ruta);
+          if (!recurso || !recurso.datos) break;
+          const distinta =
+            bloque.anchoPx && bloque.altoPx ? bloque.imagenApaisada !== pagina.ancho > pagina.alto : false;
+          const apaisada = distinta && bloque.orientacion === 'apaisada';
+          const pagW = apaisada ? pagina.alto : pagina.ancho;
+          const pagH = apaisada ? pagina.ancho : pagina.alto;
+          abrirSeccion(seccionLamina(pagW, pagH));
+          cuerpo.push(laminaXml(bloque, recurso, pagW, pagH, distinta && !apaisada));
+          // Lo que sigue va en una sección normal nueva; el cierre de la
+          // de la lámina cuelga del propio párrafo de la lámina.
+          ultimoEsLamina = true;
+          abrirSeccion(seccionNormal('nextPage', false, true));
+          ultimoEsLamina = false;
+          hayContenido = true;
+          indiceParrafo = 0;
+          trasTitular = false;
+          break;
+        }
+
         case 'paragraph': {
           const lineas = bloque.lineas || [{ hijos: bloque.hijos, tabs: 0, espacios: 0 }];
           const modo = modoDeLineas(bloque, opc);
           const nombre = nombreEstilo(hoja, sels, null);
+
+          // Conversación (chat, teatro): al margen, sin aire entre turnos,
+          // sin justificar y con sangría francesa. «paragraph-chat» manda.
+          if (bloque.chat) {
+            const declara = (p) => !!hoja.prop('paragraph-chat', p);
+            const colgante =
+              Math.abs(D.atributos(hoja, ['paragraph'], Object.assign({}, base)).sangriaPrimera || 0) ||
+              1.5 * (base.tamano || 12);
+            const atrsChat = hoja.bloque('paragraph-chat')
+              ? D.atributos(hoja, ['paragraph-chat'], Object.assign({}, atrs))
+              : atrs;
+            lineas.forEach((linea, k) => {
+              const a = Object.assign({}, atrsChat);
+              if (!declara('first-line-indent')) {
+                a.margenIzquierdo = (a.margenIzquierdo || 0) + colgante;
+                a.sangriaPrimera = -colgante;
+              }
+              if (!declara('text-alignment')) a.alineacion = 'left';
+              if (!declara('margin-top') && !(bloque.chat.inicio && k === 0)) a.margenSuperior = 0;
+              if (!declara('margin-bottom') && !(bloque.chat.fin && k === lineas.length - 1)) a.margenInferior = 0;
+              parrafo(linea.hijos, a, nombre ? { pStyle: nombre } : null);
+            });
+            hayContenido = true;
+            indiceParrafo++;
+            trasTitular = false;
+            break;
+          }
 
           // Dialogo con raya: cada replica es un parrafo, sin sangria de
           // primera linea y con la vuelta alineada tras la raya.
@@ -438,6 +719,9 @@ function construirDocx(documento, hoja, opciones) {
 
           const conSangria = (a, linea, primera, ultima, esVerso) => {
             const b = Object.assign({}, a);
+            // El verso no lleva la sangría de primera línea de la prosa,
+            // igual que en el PDF (antes el DOCX sí la sumaba).
+            if (esVerso) b.sangriaPrimera = 0;
             const sangria = sangriaDeLinea(linea, unidadTab);
             if (sangria > 0) {
               b.margenIzquierdo = (b.margenIzquierdo || 0) + sangria;
@@ -461,13 +745,25 @@ function construirDocx(documento, hoja, opciones) {
             return b;
           };
 
-          if (modo === 'verso' && lineas.length > 1) {
+          // Lo que sigue a una lámina a mitad de párrafo es el mismo
+          // párrafo: sin sangría ni espacio de arranque.
+          const continuar = (a) => {
+            if (bloque.continuacion) {
+              a.sangriaPrimera = 0;
+              a.margenSuperior = 0;
+            }
+            return a;
+          };
+
+          if (modo === 'verso' && (lineas.length > 1 || bloque.versoSuelto)) {
+            // Estrofas enteras, con «conservar con el siguiente».
+            const pegados = LIBRO.versosPegados(lineas.length);
+            if (lineas.length === 1 && esVerso(bloques[idx + 1])) pegados[0] = true;
             lineas.forEach((linea, k) => {
-              parrafo(
-                linea.hijos,
-                conSangria(atrs, linea, k === 0, k === lineas.length - 1, true),
-                nombre ? { pStyle: nombre } : null
-              );
+              const extra = Object.assign({}, nombre ? { pStyle: nombre } : {}, pegados[k] ? { keepNext: true } : {});
+              const a = conSangria(atrs, linea, k === 0, k === lineas.length - 1, true);
+              if (k === 0 && bloque.continuacion) a.margenSuperior = 0;
+              parrafo(linea.hijos, a, Object.keys(extra).length ? extra : null);
             });
           } else if (modo === 'parrafo') {
             const planos = [];
@@ -475,11 +771,11 @@ function construirDocx(documento, hoja, opciones) {
               planos.push(...l.hijos);
               if (k < lineas.length - 1) planos.push({ tipo: 'texto', valor: ' ' });
             });
-            parrafo(planos, conSangria(atrs, lineas[0], true, true), nombre ? { pStyle: nombre } : null);
+            parrafo(planos, continuar(conSangria(atrs, lineas[0], true, true)), nombre ? { pStyle: nombre } : null);
           } else {
             parrafo(
               bloque.hijos,
-              conSangria(atrs, lineas[0], true, true),
+              continuar(conSangria(atrs, lineas[0], true, true)),
               nombre ? { pStyle: nombre } : null
             );
           }
@@ -491,17 +787,27 @@ function construirDocx(documento, hoja, opciones) {
         }
 
         case 'figure': {
-          const nodo = { tipo: 'image', ruta: bloque.ruta, alt: bloque.alt };
+          // Con sus opciones: «|300» fija el ancho también en el DOCX.
+          const nodo = Object.assign({}, bloque, { tipo: 'image' });
           parrafo([nodo], atrs, null);
           if (bloque.alt) {
             const pie = D.atributos(hoja, ['paragraph', 'figure-caption'], Object.assign({}, base));
             parrafo([{ tipo: 'texto', valor: bloque.alt }], pie, { pStyle: 'Pie de imagen' });
           }
           indiceParrafo = 0;
+          trasTitular = false;
           break;
         }
 
         case 'divider': {
+          // «section-break: paragraph-divider»: el divisor abre sección.
+          if (saltoSeccion.divisor && !dentroDeCita) {
+            if (hayContenido && seccionesReales) abrirSeccion(seccionNormal(dosCaras ? 'oddPage' : 'nextPage'));
+            else if (hayContenido) cuerpo.push('<w:p><w:r><w:br w:type="page"/></w:r></w:p>');
+            indiceParrafo = 0;
+            trasTitular = false;
+            break;
+          }
           const salto = hoja.palabra('paragraph-divider', 'page-break', null);
           const visible = hoja.palabra('paragraph-divider', 'visibility', 'visible') !== 'hidden';
           const piezas = hoja.prop('paragraph-divider', 'content');
@@ -534,10 +840,39 @@ function construirDocx(documento, hoja, opciones) {
             parrafo([{ tipo: 'code', valor: linea || ' ' }], atrs, { pStyle: 'Bloque de código' });
           });
           indiceParrafo = 0;
+          trasTitular = false;
           break;
         }
 
         case 'blockquote': {
+          if (bloque.epigrafe) {
+            // Epígrafe: el aspecto de la cita, a la derecha, en el 60 %
+            // final de la caja, un 10 % más pequeño y sin sangría.
+            const sel = 'block-epigraph';
+            const declara = (p) => !!hoja.prop(sel, p);
+            const a0 = D.atributos(
+              hoja,
+              ['paragraph', 'block-all', 'block-quote', 'block-quote paragraph'].concat(hoja.bloque(sel) ? [sel] : []),
+              Object.assign({}, base)
+            );
+            if (!declara('margin-left')) a0.margenIzquierdo = 0.4 * anchoUtil;
+            if (!declara('margin-right')) a0.margenDerecho = 0;
+            if (!declara('first-line-indent')) a0.sangriaPrimera = 0;
+            if (!declara('text-alignment')) a0.alineacion = 'right';
+            if (!declara('font-size')) a0.tamano = Math.round((a0.tamano || base.tamano || 12) * 0.9 * 2) / 2;
+            if (!declara('line-height') && a0.interlineado) a0.interlineado = Math.round(a0.interlineado * 0.9 * 2) / 2;
+            const ps = (bloque.bloques || []).filter((x) => x.tipo === 'paragraph');
+            ps.forEach((sub, k) => {
+              const a = Object.assign({}, a0);
+              if (k > 0) a.margenSuperior = 0;
+              if (k < ps.length - 1) a.margenInferior = 0;
+              parrafo(sub.hijos, a, { pStyle: 'Bloque de cita' });
+            });
+            hayContenido = true;
+            indiceParrafo = 0;
+            trasTitular = false;
+            break;
+          }
           // Ulysses aplica el estilo de cita a cada parrafo de dentro
           // (cursiva y ambos margenes), no una sangria suelta.
           // «paragraph» va primero: en el PDF de Ulysses la cita conserva
@@ -554,6 +889,7 @@ function construirDocx(documento, hoja, opciones) {
             else emitir([sub], (atrsCita.margenIzquierdo || 0), true);
           });
           indiceParrafo = 0;
+          trasTitular = false;
           break;
         }
 
@@ -563,11 +899,13 @@ function construirDocx(documento, hoja, opciones) {
           emitirLista(bloque, 0, atrs);
           hayContenido = true;
           indiceParrafo = 0;
+          trasTitular = false;
           break;
 
         case 'table':
           cuerpo.push(tablaDocx(bloque, hoja, base, ctx));
           indiceParrafo = 0;
+          trasTitular = false;
           break;
 
         case 'comment': {
@@ -591,37 +929,16 @@ function construirDocx(documento, hoja, opciones) {
   if (documento.bloques.length) documento.bloques[0].primeroDelDocumento = true;
   emitir(documento.bloques, 0, false);
 
-  /* --- seccion --- */
-  const cols =
-    pagina.columnas > 1
-      ? `<w:cols w:num="${pagina.columnas}" w:space="${D.twips(pagina.separacionColumnas)}"/>`
-      : '<w:cols w:space="708"/>';
-
-  // Numeracion: si la primera numerada es la 2 con el numero 1, la
-  // primera hoja tiene que llevar el 0 y quedar oculta con «titlePg».
-  const desde = Math.max(1, Math.round(opc.desdePagina || 1));
-  const inicial = opc.numeroInicial === undefined ? 1 : Math.round(opc.numeroInicial);
-  // Word solo sabe distinguir la PRIMERA pagina, y no admite numeros
-  // negativos: con «desde» mayor que 2 el DOCX no puede reproducirlo del
-  // todo, aunque la previsualizacion si.
-  const arranque = Math.max(0, inicial - (desde - 1));
-  const primeraDistinta = desde > 1 || pagina.piePrimeraPagina === 'none';
-
-  const sectPr =
-    `<w:sectPr>` +
-    (pagina.piePagina === 'page-number'
-      ? `<w:footerReference w:type="default" r:id="rId7"/>` +
-        (primeraDistinta ? `<w:footerReference w:type="first" r:id="rId9"/>` : '')
-      : '') +
-    (primeraDistinta ? '<w:titlePg/>' : '') +
-    `<w:pgSz w:w="${D.twips(pagina.ancho)}" w:h="${D.twips(pagina.alto)}"/>` +
-    `<w:pgMar w:top="${D.twips(pagina.superior)}" w:right="${D.twips(pagina.exterior)}"` +
-    ` w:bottom="${D.twips(pagina.inferior)}" w:left="${D.twips(pagina.interior)}"` +
-    ` w:header="${D.twips(pagina.distanciaEncabezado)}"` +
-    ` w:footer="${D.twips(pagina.distanciaPie)}" w:gutter="0"/>` +
-    cols +
-    `<w:pgNumType w:start="${arranque}"/>` +
-    `</w:sectPr>`;
+  /* --- seccion final --- */
+  // Si el documento acaba en una lámina, la sección que se abrió detrás
+  // está vacía: se deshace el último cierre y la lámina es la última.
+  let final = seccionActual;
+  if (cuerpo.length === seccionActual.inicio && seccionPrevia && ultimaAdjunta) {
+    if (ultimaAdjunta.antes === null) cuerpo.splice(ultimaAdjunta.i, 1);
+    else cuerpo[ultimaAdjunta.i] = ultimaAdjunta.antes;
+    final = seccionPrevia;
+  }
+  const sectPr = sectPrXml(final);
 
   const documentXml =
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
@@ -682,7 +999,7 @@ function construirDocx(documento, hoja, opciones) {
 
   zip.anadir('word/document.xml', documentXml);
   zip.anadir('word/styles.xml', estilosXml(hoja, base));
-  zip.anadir('word/settings.xml', ajustesXml(hoja, pagina));
+  zip.anadir('word/settings.xml', ajustesXml(hoja, pagina, { espejo: dosCaras }));
   zip.anadir('word/footnotes.xml', notasXml(notas, hoja, base, ctx));
   zip.anadir('word/footer1.xml', pieXml(pagina, base));
   // Pie de la primera pagina: vacio, para portadas y preliminares.
@@ -891,8 +1208,10 @@ const FORMATO_NOTA = {
   asterisk: 'chicago',
 };
 
-function ajustesXml(hoja, pagina) {
+function ajustesXml(hoja, pagina, extra) {
   const guionado = hoja.bandera('defaults', 'hyphenation', false);
+  // Doble cara: márgenes simétricos (el izquierdo pasa a ser el interior).
+  const espejo = !!(extra && extra.espejo);
   const formato = FORMATO_NOTA[(pagina && pagina.notaFormato) || 'decimal'] || 'decimal';
   const posicion =
     pagina && pagina.notaColocacion === 'end-of-document' ? 'sectEnd' : 'pageBottom';
@@ -901,6 +1220,7 @@ function ajustesXml(hoja, pagina) {
   return (
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
     `<w:settings ${ESPACIOS_NOMBRES}>` +
+    (espejo ? '<w:mirrorMargins/>' : '') +
     (guionado ? '<w:autoHyphenation w:val="true"/>' : '') +
     `<w:footnotePr><w:footnotePosition w:val="${posicion}"/>` +
     `<w:numFmt w:val="${formato}"/><w:numRestart w:val="${reinicio}"/></w:footnotePr>` +
@@ -1233,9 +1553,33 @@ function construirCss(hoja, opciones) {
   for (let n = 1; n <= 6; n++) {
     reglas.push(reglasDe(hoja, ['heading-all', `heading-${n}`], base, `.ulysses h${n}`));
   }
-  if (pagina.saltoSeccion === 'heading-1') {
-    reglas.push(`.ulysses h1 { break-before: page; }`);
-    reglas.push(`.ulysses h1:first-child { break-before: avoid; }`);
+  // «section-break: heading-N»: ese nivel y los superiores. A doble cara
+  // la sección empieza en página derecha («right»), con blanca si hace
+  // falta, y los márgenes van en espejo.
+  const seccion = LIBRO.saltoDeSeccion(pagina.saltoSeccion);
+  const dosCaras = LIBRO.dobleCara(pagina, opc);
+  const saltoSeccion = dosCaras ? 'right' : 'page';
+  if (seccion.nivel) {
+    const hs = [];
+    for (let n = 1; n <= seccion.nivel; n++) hs.push(`.ulysses h${n}`);
+    reglas.push(`${hs.join(', ')} { break-before: ${saltoSeccion}; }`);
+    reglas.push(`${hs.map((h) => h + ':first-child').join(', ')} { break-before: avoid; }`);
+  }
+  if (!opc.previsualizacion) {
+    reglas.push(`.ulysses .salto-pagina.salto-seccion { break-after: ${saltoSeccion}; }`);
+    reglas.push(`.ulysses .salto-pagina.salto-seccion + * { break-before: ${saltoSeccion}; }`);
+    if (dosCaras && seccion.nivel) {
+      const tras = [];
+      for (let n = 1; n <= seccion.nivel; n++) tras.push(`.ulysses .salto-pagina + h${n}`);
+      reglas.push(`${tras.join(', ')} { break-before: right; }`);
+    }
+  }
+  if (dosCaras) {
+    const [recto, verso] = pagina.encuadernacion === 'right'
+      ? [[pagina.exterior, pagina.interior], [pagina.interior, pagina.exterior]]
+      : [[pagina.interior, pagina.exterior], [pagina.exterior, pagina.interior]];
+    reglas.push(`@page :right { margin-left: ${pt(recto[0])}; margin-right: ${pt(recto[1])}; }`);
+    reglas.push(`@page :left { margin-left: ${pt(verso[0])}; margin-right: ${pt(verso[1])}; }`);
   }
 
   // El primer parrafo de cada tramo lleva «paragraph :first»; los que van
@@ -1270,6 +1614,11 @@ function construirCss(hoja, opciones) {
   const atrsCodigo = D.atributos(hoja, ['block-all', 'block-code'], Object.assign({}, base));
   const familiaCodigo = pilaTipografica(atrsCodigo.familia) || 'monospace';
   reglas.push(`.ulysses pre, .ulysses code { font-family: ${familiaCodigo}; white-space: pre-wrap; }`);
+  // El código no hereda la sangría de primera línea de la prosa; la que
+  // declare el propio bloque (Universidad: -4em, colgada) sí vale.
+  if (!hoja.prop('block-code', 'first-line-indent') && !hoja.prop('block-all', 'first-line-indent')) {
+    reglas.push(`.ulysses pre { text-indent: 0; }`);
+  }
 
   const anchoBorde = hoja.puntos('table', 'border-top-width', 12, 1);
   reglas.push(
@@ -1307,6 +1656,62 @@ function construirCss(hoja, opciones) {
     reglas.push(`.ulysses p.verso + p.verso:not(.verso-ini) { padding-top: 0; }`);
   }
 
+
+  reglas.push(`.ulysses p.verso.pegado { break-after: avoid; }`);
+  reglas.push(`.ulysses p.continuacion { padding-top: 0; }`);
+  reglas.push(`.ulysses p.continuacion:not(.verso) { text-indent: 0; }`);
+
+  {
+    // Conversaciones (chat, teatro): al margen, sin aire entre turnos,
+    // sin justificar y con sangría francesa. «paragraph-chat» manda.
+    const declara = (p) => !!hoja.prop('paragraph-chat', p);
+    const atrsP = D.atributos(hoja, ['paragraph'], Object.assign({}, base));
+    const colgante = Math.abs(atrsP.sangriaPrimera || 0) || 1.5 * (base.tamano || 12);
+    if (hoja.bloque('paragraph-chat')) reglas.push(reglasDe(hoja, ['paragraph', 'paragraph-chat'], base, '.ulysses p.chat'));
+    const geo = [];
+    if (!declara('first-line-indent')) geo.push(`padding-left: ${pt(colgante)}`, `text-indent: -${pt(colgante)}`);
+    if (!declara('text-alignment')) geo.push('text-align: left');
+    if (!declara('margin-top')) geo.push('padding-top: 0');
+    if (!declara('margin-bottom')) geo.push('padding-bottom: 0');
+    if (geo.length) reglas.push(`.ulysses p.chat { ${geo.join('; ')} }`);
+    if (!declara('margin-top')) reglas.push(`.ulysses p.chat.chat-ini { padding-top: ${pt(atrsP.margenSuperior || 0)} }`);
+    if (!declara('margin-bottom')) reglas.push(`.ulysses p.chat.chat-fin { padding-bottom: ${pt(atrsP.margenInferior || 0)} }`);
+  }
+  {
+    // Epígrafe: a la derecha, en el 60 % final de la caja, más pequeño.
+    const declara = (p) => !!hoja.prop('block-epigraph', p);
+    const geo = [];
+    if (!declara('margin-left')) geo.push('margin-left: 40%');
+    if (!declara('margin-right')) geo.push('margin-right: 0');
+    if (!declara('font-size')) geo.push('font-size: 90%');
+    if (geo.length) reglas.push(`.ulysses blockquote.epigrafe { ${geo.join('; ')} }`);
+    const geoP = [];
+    if (!declara('first-line-indent')) geoP.push('text-indent: 0');
+    if (!declara('text-alignment')) geoP.push('text-align: right');
+    if (geoP.length) reglas.push(`.ulysses blockquote.epigrafe p { ${geoP.join('; ')} }`);
+    if (hoja.bloque('block-epigraph')) reglas.push(reglasDe(hoja, ['block-epigraph'], base, '.ulysses blockquote.epigrafe'));
+  }
+  {
+    // Láminas: página propia sin márgenes (páginas con nombre de CSS).
+    const W = pagina.ancho;
+    const H = pagina.alto;
+    reglas.push(`.ulysses .lamina { break-before: page; break-after: page; margin: 0; padding: 0; text-indent: 0; }`);
+    reglas.push(`.ulysses .lamina img { display: block; width: 100%; height: auto; }`);
+    reglas.push(`@page lamina { size: ${pt(W)} ${pt(H)}; margin: 0; }`);
+    reglas.push(`@page lamina-apaisada { size: ${pt(H)} ${pt(W)}; margin: 0; }`);
+    reglas.push(
+      `@media print { ` +
+        `.ulysses .lamina { page: lamina; width: ${pt(W)}; height: ${pt(H)}; overflow: hidden; position: relative; } ` +
+        `.ulysses .lamina-apaisada { page: lamina-apaisada; width: ${pt(H)}; height: ${pt(W)}; } ` +
+        `.ulysses .lamina img { width: 100%; height: 100%; max-width: none; max-height: none; object-fit: contain; } ` +
+        `.ulysses .lamina-sangre img { object-fit: cover; } ` +
+        `.ulysses .lamina-girada img { position: absolute; left: 0; top: 0; width: ${pt(H)}; height: ${pt(W)}; ` +
+        `transform-origin: top left; transform: translateY(${pt(H)}) rotate(-90deg); } }`
+    );
+    if (!hoja.prop('paragraph-figure', 'text-alignment')) reglas.push(`.ulysses figure { text-align: center; text-indent: 0; }`);
+    const altoUtil = pagina.alto - pagina.superior - pagina.inferior;
+    reglas.push(`.ulysses figure img { max-height: ${pt(altoUtil * 0.98)}; width: auto; }`);
+  }
 
   reglas.push(`.ulysses img { max-width: 100%; height: auto; }`);
   reglas.push(`.ulysses hr { border: none; border-top: 0.5pt solid #000; }`);
@@ -1417,6 +1822,7 @@ function construirCss(hoja, opciones) {
       // Dentro de columnas, un salto de pagina es un salto de columna.
       `.ulysses .salto-pagina { break-after: column; }`,
       `.ulysses .salto-pagina + * { break-before: column; }`,
+      `.ulysses .lamina { break-before: column; break-after: column; }`,
       // Y el divisor de texto se ve tal cual, centrado como pida la hoja.
       `.ulysses p.divisor { break-inside: avoid; }`,
       `.pie { position: absolute; left: ${pt(pagina.interior)}; width: ${pt(utilAncho)}; ` +
@@ -1485,7 +1891,8 @@ function inlineHtml(nodos, opc) {
         break;
       case 'image': {
         const src = opc && opc.recursoUrl ? opc.recursoUrl(nodo.ruta) : nodo.ruta;
-        s += `<img src="${escHtml(src)}" alt="${escHtml(nodo.alt || '')}"/>`;
+        const ancho = nodo.ancho ? ` style="width:${Math.round(nodo.ancho)}px"` : '';
+        s += `<img src="${escHtml(src)}" alt="${escHtml(nodo.alt || '')}"${ancho}/>`;
         break;
       }
       default:
@@ -1497,15 +1904,42 @@ function inlineHtml(nodos, opc) {
 
 function bloquesHtml(bloques, opc) {
   let s = '';
-  for (const b of bloques || []) {
+  const lista = bloques || [];
+  const esVerso = (x) =>
+    !!x && x.tipo === 'paragraph' && !x.chat && !(opc && opc.esDialogo && opc.esDialogo(x)) &&
+    modoDeLineas(x, opc) === 'verso' && ((x.lineas || []).length > 1 || !!x.versoSuelto);
+  lista.forEach((b, idx) => {
     switch (b.tipo) {
       case 'heading':
         s += `<h${b.nivel}>${inlineHtml(b.hijos, opc)}</h${b.nivel}>`;
         break;
+      case 'lamina': {
+        // Lámina: página propia. En pantalla, la imagen a todo el ancho;
+        // al imprimir, una página con nombre, sin márgenes (ver el CSS).
+        const src = opc && opc.recursoUrl ? opc.recursoUrl(b.ruta) : b.ruta;
+        const distinta = b.anchoPx && b.altoPx && opc && opc.paginaApaisada !== undefined
+          ? b.imagenApaisada !== opc.paginaApaisada
+          : false;
+        const modo = !distinta ? 'lamina-recta' : b.orientacion === 'apaisada' ? 'lamina-apaisada' : 'lamina-girada';
+        s += `<div class="lamina ${modo}${b.encaje === 'cover' ? ' lamina-sangre' : ''}">` +
+          `<img src="${escHtml(src)}" alt="${escHtml(b.alt || '')}"/></div>`;
+        break;
+      }
       case 'paragraph': {
         const clase = b.bibliografia ? ' class="bibliografia"' : '';
         const lineas = b.lineas || [{ hijos: b.hijos, tabs: 0, espacios: 0 }];
         const modo = modoDeLineas(b, opc);
+
+        // Conversación: cada línea, un párrafo «chat» (ver el CSS).
+        if (b.chat) {
+          lineas.forEach((l, k) => {
+            const c = ['chat', `chat-${b.chat.tipo}`];
+            if (b.chat.inicio && k === 0) c.push('chat-ini');
+            if (b.chat.fin && k === lineas.length - 1) c.push('chat-fin');
+            s += `<p class="${c.join(' ')}">${inlineHtml(l.hijos, opc)}</p>`;
+          });
+          break;
+        }
 
         // Sin envoltorio: un <div> alrededor rompe «p + p», y el parrafo
         // que viene detras pierde su sangria de primera linea.
@@ -1523,19 +1957,28 @@ function bloquesHtml(bloques, opc) {
             ? ` style="margin-left:${Math.round(sang * 100) / 100}pt;text-indent:0"`
             : '';
         };
-        if (modo === 'verso' && lineas.length > 1) {
+        if (modo === 'verso' && (lineas.length > 1 || b.versoSuelto)) {
+          // Estrofas enteras: los versos «pegados» no admiten corte detrás.
+          const pegados = LIBRO.versosPegados(lineas.length);
+          if (lineas.length === 1 && esVerso(lista[idx + 1])) pegados[0] = true;
           lineas.forEach((l, k) => {
-            const c = k === 0 ? 'verso verso-ini' : 'verso';
+            let c = k === 0 ? 'verso verso-ini' : 'verso';
+            if (pegados[k]) c += ' pegado';
+            if (k === 0 && b.continuacion) c += ' continuacion';
             const cl = clase ? clase.replace('"', `"${c} `) : ` class="${c}"`;
             s += `<p${cl}${estilo(l)}>${inlineHtml(l.hijos, opc)}</p>`;
           });
+        } else if (b.continuacion) {
+          const cl = clase ? clase.replace('"', '"continuacion ') : ' class="continuacion"';
+          s += `<p${cl}${estilo(lineas[0])}>${inlineHtml(b.hijos, opc)}</p>`;
         } else {
           s += `<p${clase}${estilo(lineas[0])}>${inlineHtml(b.hijos, opc)}</p>`;
         }
         break;
       }
       case 'blockquote':
-        s += `<blockquote>${bloquesHtml(b.bloques, opc)}</blockquote>`;
+        s += `<blockquote${b.epigrafe ? ' class="epigrafe"' : ''}>` +
+          `${bloquesHtml(b.bloques, Object.assign({}, opc, { seccionDivisor: false }))}</blockquote>`;
         break;
       case 'code':
         s += `<pre><code>${escHtml(b.texto)}</code></pre>`;
@@ -1546,14 +1989,18 @@ function bloquesHtml(bloques, opc) {
         // linea. Antes aqui salia siempre <hr/>, que no es ninguno de los
         // tres salvo por casualidad.
         const d = (opc && opc.divisor) || { tipo: 'linea' };
-        if (d.tipo === 'salto') s += '<div class="salto-pagina"></div>';
+        // «section-break: paragraph-divider»: el divisor abre sección.
+        if (opc && opc.seccionDivisor) s += '<div class="salto-pagina salto-seccion"></div>';
+        else if (d.tipo === 'salto') s += '<div class="salto-pagina"></div>';
         else if (d.tipo === 'texto') s += `<p class="divisor">${escHtml(d.texto)}</p>`;
         else if (d.tipo !== 'oculto') s += '<hr/>';
         break;
       }
       case 'figure': {
         const src = opc && opc.recursoUrl ? opc.recursoUrl(b.ruta) : b.ruta;
-        s += `<figure><img src="${escHtml(src)}" alt="${escHtml(b.alt || '')}"/>`;
+        // «|300» de Obsidian: ancho en píxeles, nunca más que la caja.
+        const ancho = b.ancho ? ` style="width:${Math.round(b.ancho)}px"` : '';
+        s += `<figure><img src="${escHtml(src)}" alt="${escHtml(b.alt || '')}"${ancho}/>`;
         if (b.alt) s += `<figcaption>${escHtml(b.alt)}</figcaption>`;
         s += '</figure>';
         break;
@@ -1599,7 +2046,7 @@ function bloquesHtml(bloques, opc) {
       default:
         break;
     }
-  }
+  });
   return s;
 }
 
@@ -1659,6 +2106,9 @@ const GUION_PAGINADOR = `
 function construirHtml(documento, hoja, opciones) {
   let opc = opciones || {};
   const base = D.atributosBase(hoja);
+  // Láminas, poemas, conversaciones, epígrafes y raya (ver libro.js).
+  documento = LIBRO.preparar(documento, hoja, opc);
+  const paginaDoc = ajustesPagina(hoja, opc.tamanoPagina);
 
   // Se resuelve una sola vez que clase de divisor pide la hoja.
   const saltoDiv = hoja.palabra('paragraph-divider', 'page-break', null);
@@ -1679,6 +2129,8 @@ function construirHtml(documento, hoja, opciones) {
     esDialogo: (b) => bloqueEsDialogo(b, opc),
     unidadTabPt: anchoTabulador(hoja, base, opc),
     divisor,
+    paginaApaisada: paginaDoc.ancho > paginaDoc.alto,
+    seccionDivisor: LIBRO.saltoDeSeccion(paginaDoc.saltoSeccion).divisor,
     comentariosVisibles:
       hoja.palabra('block-comment', 'visibility', 'hidden') === 'visible' ||
       !!(opc && opc.incluirComentarios),

@@ -347,8 +347,22 @@ function compilarPdf(compilador, documento, hoja, opciones) {
     ajuste = TYPST.calcularAjuste(media.bloques, posiciones, media.geo, soloSups);
   }
 
-  const segunda = TYPST.construirTypst(documento, hoja, Object.assign({ ajuste }, opciones));
-  const pdf = compilar(segunda.fuente, segunda.recursos);
+  // Folios: qué páginas quedan en blanco (o son láminas) y cuáles abren
+  // sección se sabe por la medición; la pasada final ya los compone así.
+  // El folio no ocupa sitio en el flujo, así que no altera la paginación.
+  let paginas = primera.necesitaPaginas ? TYPST.paginasDeLaMedicion(primera.bloques, posiciones) : undefined;
+  let segunda = TYPST.construirTypst(documento, hoja, Object.assign({ ajuste, paginas }, opciones));
+  let pdf = compilar(segunda.fuente, segunda.recursos);
+  if (paginas) {
+    // Comprobación: si la pasada final hubiera paginado distinto, se
+    // recompone una vez con lo que de verdad ha salido.
+    const reales = TYPST.paginasDeLaMedicion(segunda.bloques, posicionesDeBloques(compilador));
+    if (JSON.stringify(reales) !== JSON.stringify(paginas)) {
+      paginas = reales;
+      segunda = TYPST.construirTypst(documento, hoja, Object.assign({ ajuste, paginas }, opciones));
+      pdf = compilar(segunda.fuente, segunda.recursos);
+    }
+  }
   return { pdf, avisos: segunda.avisos, fuente: segunda.fuente };
 }
 

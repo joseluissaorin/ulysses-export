@@ -33,10 +33,14 @@ const MD = require('./markdown.js');
 const ULSS = require('./ulss.js');
 const E = require('./ensamblado.js');
 const METRICAS = require('./metricas.js');
+const LIBRO = require('./libro.js');
 
 /* ------------------------------------------------------------------ *
  * Constantes de Chromium
  * ------------------------------------------------------------------ */
+
+/** Formatos de imagen que entiende el compilador de Typst. */
+const FORMATOS_IMAGEN = new Set(['png', 'jpg', 'jpeg', 'gif', 'svg']);
 
 /** Factor con que Chromium encoge el contenido al imprimir (medido). */
 const S_CHROME = 3.1237822 / 3.125;
@@ -291,6 +295,8 @@ function colapsar(texto) {
  * @param opciones   las de opcionesComunes, mas:
  *                     catalogo: CatalogoFuentes con las caras disponibles
  *                     ajuste:   resultado de la primera pasada (opcional)
+ *                     paginas:  { sinFolio, primerasDeSeccion } medidas en
+ *                               una pasada anterior (opcional)
  * @returns {{fuente: string, recursos: Object, bloques: Array}}
  */
 function construirTypst(documento, hoja, opciones) {
@@ -300,6 +306,10 @@ function construirTypst(documento, hoja, opciones) {
   const geo = geometria(pagina, { galeria: opc.galeria, alturaColumnasPx: opc.alturaColumnasPx });
   const base = D.atributosBase(hoja);
   const guionado = hoja.bandera('defaults', 'hyphenation', false);
+  // Láminas, poemas, conversaciones, epígrafes y raya (ver libro.js).
+  documento = LIBRO.preparar(documento, hoja, opc);
+  const seccion = LIBRO.saltoDeSeccion(pagina.saltoSeccion);
+  const dosCaras = LIBRO.dobleCara(pagina, opc) && !geo.esGaleria;
 
   const recursos = {};
   const avisos = [];
@@ -471,7 +481,7 @@ function construirTypst(documento, hoja, opciones) {
             break;
           }
           case 'image': {
-            const exp = imagen(nodo.ruta, nodo.alt, ctx);
+            const exp = imagen(nodo, ctx);
             if (exp) partes.push(exp);
             break;
           }
@@ -487,16 +497,76 @@ function construirTypst(documento, hoja, opciones) {
 
   /* --- imágenes --- */
   let numImagen = 0;
-  function imagen(ruta, alt, ctx) {
+  function registrarImagen(ruta) {
     const r = opc.recursos ? opc.recursos(ruta) : null;
-    if (!r || !r.datos) return null;
+    if (!r || !r.datos) {
+      avisos.push(`No se encuentra la imagen «${ruta}».`);
+      return null;
+    }
+    // Typst (0.13) solo lee PNG, JPEG, GIF y SVG: con cualquier otra cosa
+    // fallaría la compilación entera, así que se deja fuera y se avisa.
+    if (!FORMATOS_IMAGEN.has(String(r.extension || 'png').toLowerCase())) {
+      avisos.push(`El PDF no admite imágenes ${String(r.extension).toUpperCase()} («${ruta}»): conviértela a PNG o JPEG.`);
+      return null;
+    }
     const nombre = `/imagen${++numImagen}.${r.extension || 'png'}`;
     recursos[nombre] = r.datos;
-    // <img> a su tamaño natural (px a 96 ppp), limitado al 100% del ancho.
-    let anchoPx = r.ancho ? r.ancho * (4 / 3) : null;
+    return { nombre, r };
+  }
+
+  /**
+   * Imagen en línea. Typst trata «image» como un bloque y, dentro de un
+   * párrafo, la descarta sin avisar: por eso va dentro de una «box».
+   * Tamaño: el natural (px a 96 ppp) o el que pida «|300» / «|300x200»,
+   * sin pasar del ancho disponible ni del alto de la caja de texto.
+   */
+  function imagen(nodo, ctx) {
+    const reg = registrarImagen(nodo.ruta);
+    if (!reg) return null;
+    const r = reg.r;
+    const natW = r.anchoPx || (r.ancho ? r.ancho * (4 / 3) : null);
+    const natH = r.altoPx || (r.alto ? r.alto * (4 / 3) : null);
+    const proporcion = natW && natH ? natH / natW : null;
+    let anchoPx = nodo.ancho || natW;
+    if (nodo.ancho && nodo.alto && proporcion) anchoPx = Math.min(nodo.ancho, nodo.alto / proporcion);
     const disponible = ctx.anchoDisponible;
-    if (anchoPx === null || anchoPx > disponible) anchoPx = disponible;
-    return `image(${cadena(nombre)}, width: ${ptTypst(anchoPx)})`;
+    if (!anchoPx || anchoPx > disponible) anchoPx = disponible;
+    const altoMax = geo.altoCont * 0.98;
+    if (proporcion && anchoPx * proporcion > altoMax) anchoPx = altoMax / proporcion;
+    return `box(image(${cadena(reg.nombre)}, width: ${ptTypst(anchoPx)}))`;
+  }
+
+  /**
+   * Lámina: la imagen sola en su página, a sangre y sin folio. Si su
+   * orientación no es la de la página, o se gira 90° dentro de la página
+   * del libro (arriba del dibujo hacia la izquierda, como en imprenta) o
+   * esa página del PDF pasa a ser apaisada.
+   */
+  function emitirLamina(b) {
+    if (geo.esGaleria) return;
+    const reg = registrarImagen(b.ruta);
+    if (!reg) return;
+    const W = geo.anchoPt;
+    const H = geo.altoPt;
+    const distinta = b.anchoPx && b.altoPx ? b.imagenApaisada !== W > H : false;
+    const encaje = b.encaje === 'cover' ? '"cover"' : '"contain"';
+    const img = (w, h) => `image(${cadena(reg.nombre)}, width: ${fmt(w)}pt, height: ${fmt(h)}pt, fit: ${encaje})`;
+    let ancho = W;
+    let alto = H;
+    let contenido;
+    if (distinta && b.orientacion === 'apaisada') {
+      ancho = H;
+      alto = W;
+      contenido = img(H, W);
+    } else if (distinta) {
+      contenido = `place(center + horizon, rotate(-90deg, reflow: true, ${img(H, W)}))`;
+    } else {
+      contenido = img(W, H);
+    }
+    salida.push(
+      `#page(width: ${fmt(ancho)}pt, height: ${fmt(alto)}pt, margin: 0pt, columns: 1, ` +
+        `header: none, footer: none, foreground: none, background: none)[#${contenido}]`
+    );
   }
 
   /* --- bloques --- */
@@ -504,6 +574,9 @@ function construirTypst(documento, hoja, opciones) {
   const bloquesInfo = []; // para la segunda pasada
   let indiceBloque = 0;
   const ajuste = opc.ajuste || null; // resultados de la primera pasada
+  // Un divisor que abre sección («section-break: paragraph-divider») no
+  // se imprime: marca como primero de sección al bloque que le sigue.
+  let seccionPendiente = false;
 
   /** Un tramo de texto suelto con su caja de línea registrada en ctx. */
   function textoPlano(texto, est, ctx) {
@@ -635,7 +708,11 @@ function construirTypst(documento, hoja, opciones) {
       ascStrut: cajaStrut.ascL,
       ascLinea1: ascPrimeraLinea,
       conSup: !!ctx.fraccionSup,
+      // Primer bloque de una sección: su página es la «primera página»
+      // de la sección para «area-footer :first-page».
+      seccion: !!extra.seccion || seccionPendiente,
     };
+    seccionPendiente = false;
     bloquesInfo.push(info);
 
     // Segunda pasada: corrección del relleno para clavar la línea base en
@@ -675,9 +752,12 @@ function construirTypst(documento, hoja, opciones) {
         : '';
     const relleno = pbFinal > 0 ? `#block(width: 100%, height: ${ptTypst(pbFinal)}, breakable: true)` : '';
 
+    // «sticky» solo para lo que el renderizador antiguo no hacía (las
+    // estrofas): el «keep-with-following» de los titulares sigue sin
+    // aplicarse, como en Chromium, para no mover la paginación.
     salida.push(
       saltoForzado +
-        `#block(width: 100%, above: 0pt, below: 0pt, breakable: ${!extra.indivisible}, sticky: false, ` +
+        `#block(width: 100%, above: 0pt, below: 0pt, breakable: ${!extra.indivisible}, sticky: ${!!extra.pegar}, ` +
         `inset: (left: ${ptTypst(insetIzq)}, right: ${ptTypst(mr)}))[` +
         `#set par(${setPar.join(', ')})\n#set align(${alineacion})\n` +
         `#set text(top-edge: ${ptTypst(ascL)}, bottom-edge: ${ptTypst(-descL)})\n` +
@@ -839,6 +919,18 @@ function construirTypst(documento, hoja, opciones) {
     salida.push('#pagebreak(weak: true)');
   }
 
+  /**
+   * Salto que abre sección. A doble cara, la sección empieza en página
+   * impar, con una página en blanco delante si hace falta (Ulysses:
+   * «first pages will be forced for placement on the right side»; con
+   * encuadernación por la derecha la impar es la de la izquierda, así
+   * que también es impar).
+   */
+  function saltoDeSeccion() {
+    if (pagina.columnas > 1) return;
+    salida.push(dosCaras ? '#pagebreak(weak: true, to: "odd")' : '#pagebreak(weak: true)');
+  }
+
   /* --- cascada por tipo de bloque (espejo de construirCss) --- */
 
   const declP = declaracionesDe(hoja, ['paragraph'], base);
@@ -858,8 +950,10 @@ function construirTypst(documento, hoja, opciones) {
     ? declaracionesDe(hoja, ['paragraph', 'paragraph-bibliography'], base)
     : { ml: E.SANGRIA_BIBLIOGRAFIA, sangria: -E.SANGRIA_BIBLIOGRAFIA };
   const declH = [1, 2, 3, 4, 5, 6].map((n) => declaracionesDe(hoja, ['heading-all', `heading-${n}`], base));
-
-  const saltoH1 = pagina.saltoSeccion === 'heading-1';
+  // Extensiones del plugin para libros: Ulysses ignora estos selectores.
+  const declChat = hoja.bloque('paragraph-chat') ? declaracionesDe(hoja, ['paragraph-chat'], base) : null;
+  const declEpigrafe = hoja.bloque('block-epigraph') ? declaracionesDe(hoja, ['block-epigraph'], base) : null;
+  const declara = (sel, prop) => !!hoja.prop(sel, prop);
   const unidadTab = E.anchoTabulador(hoja, base, opc);
   const sangriaVersoPt = (opc.sangriaVersoEm === undefined || opc.sangriaVersoEm === null ? 2 : opc.sangriaVersoEm) * (base.tamano || 12);
   const dialogoGeo = E.sangriaDialogo(hoja, base);
@@ -901,18 +995,30 @@ function construirTypst(documento, hoja, opciones) {
       est.mr = (est.mr || 0) + mrExtra;
       parrafo(est, nodos, extra);
     };
-    for (const b of bloques || []) {
+    const lista = bloques || [];
+    const esVerso = (x) =>
+      !!x && x.tipo === 'paragraph' && !x.chat && !E.bloqueEsDialogo(x, opc) &&
+      E.modoDeLineas(x, opc) === 'verso' && ((x.lineas || []).length > 1 || !!x.versoSuelto);
+    lista.forEach((b, idx) => {
       const esPrimeroDelArticulo = ctx.articulo && primero;
       switch (b.tipo) {
         case 'heading': {
           const est = computar(padre, declH[b.nivel - 1]);
-          if (saltoH1 && b.nivel === 1 && !esPrimeroDelArticulo) est.saltoAntes = true;
-          if (est.saltoAntes) saltoDePagina();
-          emitir(est, b.hijos, { sticky: est.mantener });
+          // «section-break: heading-N»: ese nivel y los superiores abren
+          // sección (antes solo se entendía «heading-1»).
+          const abre = LIBRO.abreSeccion(seccion, b) && !esPrimeroDelArticulo && !ctx.enCita;
+          if (abre) saltoDeSeccion();
+          else if (est.saltoAntes) saltoDePagina();
+          emitir(est, b.hijos, { sticky: est.mantener, seccion: abre });
           if (est.saltoDespues) saltoDePagina();
           anterior = `h${b.nivel}`;
           break;
         }
+
+        case 'lamina':
+          emitirLamina(b);
+          anterior = 'figure';
+          break;
 
         case 'paragraph': {
           const lineas = b.lineas || [{ hijos: b.hijos, tabs: 0, espacios: 0 }];
@@ -923,6 +1029,28 @@ function construirTypst(documento, hoja, opciones) {
           if (/^h\d$/.test(anterior || '') && declPTrasH) cascada.push(declPTrasH);
           if (ctx.enCita && declCitaP) cascada.push(declCitaP);
           if (b.bibliografia) cascada.push(declBiblio);
+
+          if (b.chat) {
+            // Conversación (chat, teatro): un registro al margen, sin
+            // sangría ni aire entre turnos, sin justificar y con sangría
+            // francesa para los mensajes largos. «paragraph-chat» manda.
+            const colgante = Math.abs(declP.sangria || 0) || 1.5 * (base.tamano || 12);
+            lineas.forEach((l, k) => {
+              const c = cascada.slice();
+              if (declChat) c.push(declChat);
+              const est = computar(padre, ...c);
+              if (!declara('paragraph-chat', 'first-line-indent')) {
+                est.ml = (est.ml || 0) + colgante;
+                est.sangria = -colgante;
+              }
+              if (!declara('paragraph-chat', 'text-alignment')) est.alineacion = 'left';
+              if (!declara('paragraph-chat', 'margin-top') && !(b.chat.inicio && k === 0)) est.pt = 0;
+              if (!declara('paragraph-chat', 'margin-bottom') && !(b.chat.fin && k === lineas.length - 1)) est.pb = 0;
+              emitir(est, l.hijos, {});
+              anterior = 'p';
+            });
+            break;
+          }
 
           if (E.bloqueEsDialogo(b, opc)) {
             // p.dialogo: geometría de la lista sin numerar
@@ -945,7 +1073,12 @@ function construirTypst(documento, hoja, opciones) {
             break;
           }
 
-          if (modo === 'verso' && lineas.length > 1) {
+          if (modo === 'verso' && (lineas.length > 1 || b.versoSuelto)) {
+            // Estrofas enteras: hasta cuatro versos no se parten, las
+            // más largas dejan dos versos a cada lado del corte, y un
+            // verso suelto no se queda solo al pie si sigue más poema.
+            const pegados = LIBRO.versosPegados(lineas.length);
+            if (lineas.length === 1 && esVerso(lista[idx + 1])) pegados[0] = true;
             lineas.forEach((l, k) => {
               const c = cascada.slice();
               if (k > 0) {
@@ -956,7 +1089,7 @@ function construirTypst(documento, hoja, opciones) {
               }
               const est = computar(padre, ...c);
               est.pb = 0;
-              if (k > 0) est.pt = 0;
+              if (k > 0 || b.continuacion) est.pt = 0;
               // padding-left sv + text-indent -sv (sangría francesa del
               // verso). Ojo: el HTML antiguo pone «text-indent: 0» en las
               // líneas sangradas con tabuladores, así que ahí no hay
@@ -964,7 +1097,7 @@ function construirTypst(documento, hoja, opciones) {
               const sangriaLinea = E.sangriaDeLinea(l, unidadTab);
               est.ml = (est.ml || 0) + sangriaVersoPt + sangriaLinea;
               est.sangria = sangriaLinea > 0 ? 0 : -sangriaVersoPt;
-              emitir(est, l.hijos, { indivisible: true });
+              emitir(est, l.hijos, { indivisible: true, pegar: pegados[k] });
               anterior = 'p';
             });
             break;
@@ -976,6 +1109,12 @@ function construirTypst(documento, hoja, opciones) {
             est.ml = (est.ml || 0) + sangriaLinea;
             est.sangria = 0;
           }
+          if (b.continuacion) {
+            // Lo que sigue a una lámina en mitad de un párrafo es el mismo
+            // párrafo: ni sangría ni relleno de arranque.
+            est.sangria = 0;
+            est.pt = 0;
+          }
           if (ctx.enLi) {
             // li > p { margin: 0; padding: 0; text-indent: 0 }
             est.pt = 0; est.pb = 0; est.ml = 0; est.mr = 0; est.sangria = 0;
@@ -986,6 +1125,11 @@ function construirTypst(documento, hoja, opciones) {
         }
 
         case 'blockquote': {
+          if (b.epigrafe) {
+            emitirEpigrafe(b, padre, emitir);
+            anterior = 'blockquote';
+            break;
+          }
           const est = computar(padre, declCita);
           // Hoja de estilos del navegador: blockquote { margin: 1em 40px }.
           // El CSS del plugin solo pisa los lados que la hoja declara; si
@@ -1012,6 +1156,11 @@ function construirTypst(documento, hoja, opciones) {
         case 'code': {
           const est = computar(padre, declPre);
           est.familia = familiaCodigoDe();
+          // Un bloque literal no hereda la sangría de primera línea de la
+          // prosa (el <pre> antiguo sangraba solo su primera línea). La
+          // que declare el propio bloque sí vale: Universidad cuelga el
+          // código con «first-line-indent: -4em».
+          if (!declara('block-code', 'first-line-indent') && !declara('block-all', 'first-line-indent')) est.sangria = 0;
           // white-space: pre-wrap. Los tabuladores avanzan hasta la
           // siguiente parada de 8 × espacio (tab-size de CSS), medida con
           // los avances reales de la fuente del código.
@@ -1042,7 +1191,12 @@ function construirTypst(documento, hoja, opciones) {
         }
 
         case 'divider': {
-          if (divisor.tipo === 'salto') {
+          if (seccion.divisor && !ctx.enCita) {
+            // «section-break: paragraph-divider»: el divisor abre sección.
+            saltoDeSeccion();
+            seccionPendiente = true;
+            anterior = 'div';
+          } else if (divisor.tipo === 'salto') {
             saltoDePagina();
             anterior = 'div';
           } else if (divisor.tipo === 'texto') {
@@ -1073,14 +1227,16 @@ function construirTypst(documento, hoja, opciones) {
           // figure { margin: 1em 40px } del UA, igual que el blockquote.
           if (declFigura.ml == null) est.ml = 30;
           if (declFigura.mr == null) est.mr = 30;
-          const f = fuenteDe(est);
-          const ctxImg = { anchoDisponible: geo.anchoColumna - lu(ptApx(est.ml || 0)) - lu(ptApx(est.mr || 0)) };
-          const exp = imagen(b.ruta, b.alt, ctxImg);
-          if (exp) {
-            // <figure> con la imagen en línea dentro de una línea de texto: la
-            // imagen se apoya en la línea base; aquí se simplifica apoyándola
-            // en el fondo de la caja.
-            emitir(est, [{ tipo: 'image', ruta: b.ruta, alt: b.alt }], {});
+          // Centrada salvo que el estilo diga otra cosa, y sin la sangría
+          // de primera línea, que la descentraba.
+          if (!declara('paragraph-figure', 'text-alignment')) est.alineacion = 'center';
+          est.sangria = 0;
+          const existe = opc.recursos && opc.recursos(b.ruta);
+          if (existe && existe.datos && FORMATOS_IMAGEN.has(String(existe.extension || 'png').toLowerCase())) {
+            const nodo = Object.assign({}, b, { tipo: 'image' });
+            emitir(est, [nodo], {});
+          } else {
+            registrarImagen(b.ruta); // solo para dejar el aviso
           }
           if (b.alt) {
             const estPie = computar(est, declPieFigura);
@@ -1115,7 +1271,36 @@ function construirTypst(documento, hoja, opciones) {
           break;
       }
       primero = false;
-    }
+    });
+  }
+
+  /**
+   * Epígrafe: la cita que va justo debajo de un titular. Conserva el
+   * aspecto de la cita del estilo (cursiva, color) pero se compone a la
+   * derecha, en el 60 % final de la caja, un 10 % más pequeña y sin
+   * sangría. «block-epigraph» en la hoja pisa cualquiera de esas cosas.
+   */
+  function emitirEpigrafe(b, padre, emitir) {
+    const estCita = computar(padre, declCita);
+    const anchoPt = geo.anchoColumna * 0.75;
+    const parrafos = (b.bloques || []).filter((x) => x.tipo === 'paragraph');
+    parrafos.forEach((p, k) => {
+      const c = [declP];
+      if (k > 0) c.push(declPTrasP);
+      if (declCitaP) c.push(declCitaP);
+      if (declEpigrafe) c.push(declEpigrafe);
+      const est = computar(estCita, ...c);
+      const sel = 'block-epigraph';
+      est.ml = declara(sel, 'margin-left') ? est.ml : 0.4 * anchoPt;
+      est.mr = declara(sel, 'margin-right') ? est.mr : 0;
+      if (!declara(sel, 'first-line-indent')) est.sangria = 0;
+      if (!declara(sel, 'text-alignment')) est.alineacion = 'right';
+      if (!declara(sel, 'font-size')) est.tamano = Math.round((estCita.tamano || base.tamano || 12) * 0.9 * 2) / 2;
+      if (!declara(sel, 'line-height') && est.interlineado) est.interlineado = Math.round(est.interlineado * 0.9 * 2) / 2;
+      est.pt = k === 0 ? (declara(sel, 'margin-top') ? est.pt : estCita.pt || 0) : 0;
+      est.pb = k === parrafos.length - 1 ? (declara(sel, 'margin-bottom') ? est.pb : estCita.pb || 0) : 0;
+      emitir(est, p.hijos, {});
+    });
   }
 
   /** Listas: marca en una caja en línea y sangría francesa, como el CSS. */
@@ -1403,30 +1588,71 @@ function construirTypst(documento, hoja, opciones) {
     const baseline = Math.round(topLinea + m.asc);
     const centro = (geo.ox + Math.floor(geo.pagPxW + 1e-6) - Math.floor(geo.mrPx + 1e-6) + 0.5) / 2;
     const derecha = Math.floor(geo.pagPxW + 1e-6) - Math.floor(geo.mrPx + 1e-6) + 0.5;
-    const primera = pagina.piePrimeraPagina === 'none' ? 'if here().page() > 1 ' : '';
+
+    // Páginas sin folio. Ulysses aplica «:first-page» a la primera
+    // página de CADA sección; y un libro no numera las páginas en blanco
+    // que abren sección. Ambas cosas se conocen tras una pasada de
+    // medición (preguntarlo dentro del documento cuesta el cuadrado del
+    // número de párrafos y revienta el WASM en una novela).
+    const paginas = opc.paginas || null;
+    const excluir = new Set(paginas ? paginas.sinFolio || [] : []);
+    let condicion = '';
+    if (pagina.piePrimeraPagina === 'none') {
+      if (paginas) {
+        excluir.add(1);
+        for (const p of paginas.primerasDeSeccion || []) excluir.add(p);
+      } else {
+        condicion = 'if here().page() > 1 ';
+      }
+    }
+    if (excluir.size) {
+      const lista = Array.from(excluir).sort((a, b) => a - b).join(', ');
+      condicion = `if not (${lista},).contains(here().page()) `;
+    }
+
     const texto =
       `text(font: ${cadena(f.familia)}, size: ${fmt(16 * PX_PAGINA)}pt, top-edge: ${fmt(m.asc * PX_PAGINA)}pt, bottom-edge: ${fmt(-m.desc * PX_PAGINA)}pt, ` +
       `weight: "regular", style: "normal", str(counter(page).get().first()))`;
     // El CSS antiguo solo distinguía derecha; todo lo demás iba al centro
     const ali = pagina.alineacionPie === 'right' ? 'right' : 'center';
+    const dy = fmt((baseline - m.asc) * PX_PAGINA);
     let pos;
-    if (ali === 'center') {
-      pos = `place(top + left, dx: ${fmt(centro * PX_PAGINA)}pt - ancho / 2, dy: ${fmt((baseline - m.asc) * PX_PAGINA)}pt, t)`;
+    if (dosCaras) {
+      // A doble cara el folio va en espejo en las páginas cuyo margen
+      // interior queda a la derecha: centrado en su caja o, si iba a la
+      // derecha, al borde exterior, que en esas páginas es el izquierdo.
+      const espejo = pagina.encuadernacion === 'right' ? 'calc.odd(here().page())' : 'calc.even(here().page())';
+      const normal = (ali === 'center' ? centro : derecha) * PX_PAGINA;
+      const reflejo = geo.anchoPt - normal;
+      const dx =
+        ali === 'center'
+          ? `(if ${espejo} { ${fmt(reflejo)}pt } else { ${fmt(normal)}pt }) - ancho / 2`
+          : `if ${espejo} { ${fmt(reflejo)}pt } else { ${fmt(normal)}pt - ancho }`;
+      pos = `let dx = ${dx}; place(top + left, dx: dx, dy: ${dy}pt, t)`;
+    } else if (ali === 'center') {
+      pos = `place(top + left, dx: ${fmt(centro * PX_PAGINA)}pt - ancho / 2, dy: ${dy}pt, t)`;
     } else if (ali === 'right') {
-      pos = `place(top + left, dx: ${fmt(derecha * PX_PAGINA)}pt - ancho, dy: ${fmt((baseline - m.asc) * PX_PAGINA)}pt, t)`;
+      pos = `place(top + left, dx: ${fmt(derecha * PX_PAGINA)}pt - ancho, dy: ${dy}pt, t)`;
     } else {
-      pos = `place(top + left, dx: ${fmt(geo.ox * PX_PAGINA)}pt, dy: ${fmt((baseline - m.asc) * PX_PAGINA)}pt, t)`;
+      pos = `place(top + left, dx: ${fmt(geo.ox * PX_PAGINA)}pt, dy: ${dy}pt, t)`;
     }
-    return `context ${primera}{ let t = ${texto}; let ancho = measure(t).width; ${pos} }`;
+    return `context ${condicion}{ let t = ${texto}; let ancho = measure(t).width; ${pos} }`;
   }
 
   /* --- ensamblado --- */
   E.marcarBibliografia(documento.bloques, opc.encabezadosBibliografia);
 
+  // A doble cara, márgenes en espejo: el interior (el izquierdo de la
+  // geometría de Chromium) va hacia el lomo. El ancho de la caja no
+  // cambia, así que el partido de líneas es el mismo.
+  const margenes = dosCaras
+    ? `margin: (inside: ${fmt(geo.margenes.izquierda)}pt, top: ${fmt(geo.margenes.superior)}pt, ` +
+      `outside: ${fmt(geo.margenes.derecha)}pt, bottom: ${fmt(geo.margenes.inferior)}pt), binding: ${pagina.encuadernacion}, `
+    : `margin: (left: ${fmt(geo.margenes.izquierda)}pt, top: ${fmt(geo.margenes.superior)}pt, ` +
+      `right: ${fmt(geo.margenes.derecha)}pt, bottom: ${fmt(geo.margenes.inferior)}pt), `;
   const setPagina =
     `#set page(width: ${fmt(geo.anchoPt)}pt, height: ${fmt(geo.altoPt)}pt, ` +
-    `margin: (left: ${fmt(geo.margenes.izquierda)}pt, top: ${fmt(geo.margenes.superior)}pt, ` +
-    `right: ${fmt(geo.margenes.derecha)}pt, bottom: ${fmt(geo.margenes.inferior)}pt), ` +
+    margenes +
     (geo.columnas > 1 ? `columns: ${geo.columnas}, ` : '') +
     `header: none, footer: none, foreground: ${piePagina()})` +
     (geo.columnas > 1 ? `\n#set columns(gutter: ${ptTypst(geo.huecoPx)})` : '');
@@ -1451,8 +1677,36 @@ function construirTypst(documento, hoja, opciones) {
     recursos,
     bloques: bloquesInfo,
     geo,
-    avisos,
+    avisos: Array.from(new Set(avisos)),
+    // ¿Hace falta medir qué páginas llevan folio? Con doble cara (hay
+    // páginas en blanco) o con «:first-page» y secciones.
+    necesitaPaginas:
+      pagina.piePagina === 'page-number' &&
+      (dosCaras || (pagina.piePrimeraPagina === 'none' && !!(seccion.nivel || seccion.divisor))),
   };
+}
+
+/**
+ * Qué páginas no llevan folio y cuáles abren sección, a partir de las
+ * posiciones medidas en una pasada. Una página sin ningún bloque de
+ * texto es una página en blanco o una lámina.
+ */
+function paginasDeLaMedicion(bloques, posiciones) {
+  const conTexto = new Set();
+  let ultima = 0;
+  for (const p of Object.values(posiciones || {})) {
+    if (!p.pagina) continue;
+    const fin = p.paginaFin || p.pagina;
+    for (let q = p.pagina; q <= fin; q++) conTexto.add(q);
+    ultima = Math.max(ultima, fin);
+  }
+  const sinFolio = [];
+  for (let q = 1; q <= ultima; q++) if (!conTexto.has(q)) sinFolio.push(q);
+  const primeras = new Set([1]);
+  for (const b of bloques || []) {
+    if (b.seccion && posiciones[b.k] && posiciones[b.k].pagina) primeras.add(posiciones[b.k].pagina);
+  }
+  return { sinFolio, primerasDeSeccion: Array.from(primeras).sort((a, b) => a - b) };
 }
 
 /* ------------------------------------------------------------------ *
@@ -1612,6 +1866,7 @@ function calcularAjuste(bloques, posiciones, geo, previo) {
 
 module.exports = {
   construirTypst,
+  paginasDeLaMedicion,
   GENERICAS,
   calcularAjuste,
   geometria,
