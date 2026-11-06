@@ -28,6 +28,12 @@ Android)**, fully offline.
   chat and play transcripts, epigraphs, and Spanish dialogue dashes set
   as the RAE prescribes. Per-note overrides through `ulysses-…`
   properties. See [`docs/libro.md`](docs/libro.md) (Spanish).
+- **Screenplay layout** (since 2.2): a play written the usual way
+  (`NAME (direction): line`) is set as a film script, with a title page,
+  character cues, parentheticals, dialogue and action columns, typewriter
+  drawings that keep every space, and the Spanish `(MÁS)` / `(CONT.)`
+  (*more*, *continued*) when a speech crosses a page. Turned on by a style
+  with `script-…` selectors, such as `ejemplos/estilos/Guion.ulss`.
 
 ## The PDF engine
 
@@ -71,8 +77,9 @@ Manual, until it lands in the community catalog: copy `main.js`,
 ## Examples
 
 See [`ejemplos/`](ejemplos/): one sample note exported with two different
-Ulysses styles, and a short book sample with a calligram plate, a chat,
-a poem and an epigraph (source `.md` + resulting PDFs).
+Ulysses styles, a short book sample with a calligram plate, a chat,
+a poem and an epigraph, and a short play set as a film script (source
+`.md` + resulting PDFs).
 
 ## Development
 

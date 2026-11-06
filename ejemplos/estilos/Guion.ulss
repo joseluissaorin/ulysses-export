@@ -1,0 +1,350 @@
+//
+// Guion
+//
+// Una obra de teatro compuesta como un guion de cine: Courier a 12 puntos,
+// seis líneas por pulgada, el nombre del personaje en mayúsculas sobre su
+// réplica, las acotaciones entre paréntesis bajo el nombre y la acción a
+// todo el ancho. La primera página lleva solo el título y los subtítulos.
+//
+// El texto se escribe como siempre en el teatro:
+//
+//     ROSA (sin mirarle): Ya llegó el agua.
+//     (Entra TOMÁS con el cubo)
+//
+// o bien con el nombre en negrita en su propia línea. El motor reconoce
+// los turnos y los compone con los estilos «script-…» de abajo; donde la
+// hoja no da sangrías, aplica las medidas de un guion de cine.
+//
+
+
+
+//
+// Página
+//
+
+document-settings {
+
+	page-inset-top:		25mm
+	page-inset-bottom:	25mm
+	page-inset-inner:	38mm
+	page-inset-outer:	25mm
+
+	two-sided:		no
+
+	footnote-enumeration:	continuous
+	footnote-placement:	end-of-page
+	footnote-style:		decimal
+
+	}
+
+
+defaults {
+
+	font-family:	"Courier Prime"
+	font-size:	12pt
+	line-height:	12pt
+
+	text-alignment:	left
+	hyphenation:	no
+
+	}
+
+
+area-header {
+
+	content:	none
+
+	}
+
+
+area-footer {
+
+	content:		page-number
+	font-size:		12pt
+	text-alignment:		right
+	bottom-spacing:		12mm
+
+	}
+
+
+area-footer :first-page {
+
+	content:	none
+
+	}
+
+
+area-footnotes {
+
+	font-size:	10pt
+	line-height:	12pt
+
+	}
+
+
+
+//
+// Titulares
+//
+
+heading-all {
+
+	font-size:		12pt
+	line-height:		12pt
+	font-weight:		bold
+	keep-with-following:	yes
+
+	}
+
+
+heading-1 {
+
+	style-title:		"Título"
+	// La portada: el motor lo baja a un tercio de la página
+
+	text-transform:		uppercase
+	text-alignment:		center
+	margin-left:		72pt
+	margin-right:		72pt
+	margin-top:		0pt
+	margin-bottom:		12pt
+
+	}
+
+
+heading-2 {
+
+	style-title:		"Acto"
+
+	text-transform:		uppercase
+	text-alignment:		center
+	page-break:		before
+	margin-top:		0pt
+	margin-bottom:		0pt
+
+	}
+
+
+heading-3 {
+
+	style-title:		"Escena"
+	// El encabezado de escena del guion
+
+	text-transform:		uppercase
+	text-alignment:		left
+	margin-top:		24pt
+	margin-bottom:		12pt
+
+	}
+
+
+heading-4 {
+
+	style-title:		"Subescena"
+
+	text-transform:		uppercase
+	font-weight:		normal
+	margin-top:		12pt
+	margin-bottom:		12pt
+
+	}
+
+
+
+//
+// Texto
+//
+
+paragraph {
+
+	style-title:		"Acción"
+	margin-top:		12pt
+	margin-bottom:		0pt
+	first-line-indent:	0pt
+	default-tab-interval:	14.4pt
+	// Dos caracteres de Courier: las sangrías caen en la rejilla de la máquina
+
+	}
+
+
+paragraph-divider {
+
+	visibility:	hidden
+
+	}
+
+
+
+//
+// Guion
+//
+
+script-title {
+
+	style-title:		"Subtítulo"
+	// Lo que sigue al título en la portada
+	text-alignment:		center
+	margin-top:		12pt
+	margin-bottom:		0pt
+
+	}
+
+
+script-action {
+
+	style-title:		"Acción del guion"
+	margin-top:		12pt
+	margin-bottom:		0pt
+
+	}
+
+
+script-character {
+
+	style-title:		"Personaje"
+	text-transform:		uppercase
+	margin-top:		12pt
+	margin-bottom:		0pt
+	keep-with-following:	yes
+
+	}
+
+
+script-parenthetical {
+
+	style-title:		"Acotación"
+	margin-top:		0pt
+	margin-bottom:		0pt
+	keep-with-following:	yes
+
+	}
+
+
+script-dialogue {
+
+	style-title:		"Diálogo"
+	margin-top:		0pt
+	margin-bottom:		0pt
+
+	}
+
+
+
+//
+// Bloques
+//
+
+block-quote {
+
+	margin-left:	72pt
+	margin-right:	72pt
+	margin-top:	12pt
+
+	}
+
+
+block-code {
+
+	font-family:	"Courier Prime"
+	margin-top:	12pt
+
+	}
+
+
+block-raw {
+
+	visibility:	hidden
+
+	}
+
+
+block-comment {
+
+	visibility:	hidden
+
+	}
+
+
+list-all {
+
+	margin-top:	12pt
+	margin-left:	0pt
+
+	}
+
+
+list-unordered {
+
+	enumeration-format:	"—"
+	text-inset:		2em
+
+	}
+
+
+list-ordered {
+
+	enumeration-format:	"%d."
+	text-inset:		2em
+
+	}
+
+
+
+//
+// En línea
+//
+
+inline-strong {
+
+	font-weight:	bold
+
+	}
+
+
+inline-emphasis {
+
+	font-slant:	italic
+
+	}
+
+
+inline-mark {
+
+	underline:	single
+
+	}
+
+
+inline-link {
+
+	underline:	single
+
+	}
+
+
+inline-comment {
+
+	visibility:	hidden
+
+	}
+
+
+inline-delete {
+
+	visibility:	hidden
+
+	}
+
+
+inline-raw {
+
+	visibility:	hidden
+
+	}
+
+
+ulysses-tag {
+
+	visibility:	hidden
+
+	}

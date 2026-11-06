@@ -15,6 +15,9 @@ numeradas y de viñetas, cita en bloque, divisor y una nota al pie.
 | `libro.md` | Una pieza breve para la composición de libro: epígrafe, diálogo, una lámina, un chat y un poema |
 | `faro.png` | El caligrama de `libro.md`: un A4 apaisado a 150 ppp, que el plugin reconoce como lámina |
 | `muestra-libro.pdf` | `libro.md` exportado con Novela, a doble cara y con la lámina girada |
+| `obra.md` | Una escena breve de teatro, escrita como siempre |
+| `estilos/Guion.ulss` | Estilo de guion de cine (Courier Prime, papeles `script-…`) |
+| `muestra-guion.pdf` | `obra.md` exportada con Guion: portada, personajes, acotaciones, acción y un dibujo |
 
 Para regenerarlos desde la terminal:
 
@@ -22,10 +25,11 @@ Para regenerarlos desde la terminal:
 node scripts/exportar.mjs ejemplos/muestra.md ejemplos/estilos/Novela.ulss ejemplos/muestra-novela.pdf
 node scripts/exportar.mjs ejemplos/muestra.md ejemplos/estilos/Universidad.ulss ejemplos/muestra-universidad.pdf
 node scripts/exportar.mjs ejemplos/libro.md ejemplos/estilos/Novela.ulss ejemplos/muestra-libro.pdf
+node scripts/exportar.mjs ejemplos/obra.md ejemplos/estilos/Guion.ulss ejemplos/muestra-guion.pdf
 ```
 
 (Hace falta tener las tipografías correspondientes instaladas; si no las
 hay, el motor cae a las alternativas y lo avisa.)
 
-Las hojas proceden de la galería de estilos de Ulysses y conservan la
-autoría indicada en sus cabeceras.
+Novela y Universidad proceden de la galería de estilos de Ulysses y
+conservan la autoría indicada en sus cabeceras; Guion es propia.

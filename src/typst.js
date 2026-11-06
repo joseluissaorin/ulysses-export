@@ -34,6 +34,7 @@ const ULSS = require('./ulss.js');
 const E = require('./ensamblado.js');
 const METRICAS = require('./metricas.js');
 const LIBRO = require('./libro.js');
+const GUION = require('./guion.js');
 
 /* ------------------------------------------------------------------ *
  * Constantes de Chromium
@@ -575,6 +576,7 @@ function construirTypst(documento, hoja, opciones) {
   const salida = [];
   const bloquesInfo = []; // para la segunda pasada
   let indiceBloque = 0;
+  let replicasGuion = 0; // réplicas de un guion con marca de página
   const ajuste = opc.ajuste || null; // resultados de la primera pasada
   // Un divisor que abre sección («section-break: paragraph-divider») no
   // se imprime: marca como primero de sección al bloque que le sigue.
@@ -602,7 +604,9 @@ function construirTypst(documento, hoja, opciones) {
    *   estilo:    estilo computado (pt/pb/ml/mr/sangria/...)
    *   contenido: nodos inline
    *   extra:     { marcador, colgante, sticky, lineas, preformateado,
-   *                indivisible, familiaCodigo, ptExtra, pbExtra }
+   *                indivisible, familiaCodigo, ptExtra, pbExtra,
+   *                marcaIni, marcaFin }   (contenido de Typst al principio
+   *                y al final del párrafo: las marcas de las réplicas)
    *
    * Modelo de relleno vertical (calcado de la fragmentación de Blink):
    *   · padding-top: una caja invisible de ancho cero en la primera
@@ -763,7 +767,8 @@ function construirTypst(documento, hoja, opciones) {
         `inset: (left: ${ptTypst(insetIzq)}, right: ${ptTypst(mr)}))[` +
         `#set par(${setPar.join(', ')})\n#set align(${alineacion})\n` +
         `#set text(top-edge: ${ptTypst(ascL)}, bottom-edge: ${ptTypst(-descL)})\n` +
-        `#par(${cajaRelleno}${posicion('i')} + ${cuerpo} + ${posicion('f')})${relleno}]`
+        `#par(${cajaRelleno}${posicion('i')} + ${extra.marcaIni ? extra.marcaIni + ' + ' : ''}${cuerpo} + ` +
+        `${extra.marcaFin ? extra.marcaFin + ' + ' : ''}${posicion('f')})${relleno}]`
     );
   }
 
@@ -957,6 +962,19 @@ function construirTypst(documento, hoja, opciones) {
   const declEpigrafe = hoja.bloque('block-epigraph') ? declaracionesDe(hoja, ['block-epigraph'], base) : null;
   const declara = (sel, prop) => !!hoja.prop(sel, prop);
   const unidadTab = E.anchoTabulador(hoja, base, opc);
+  // Guion de cine (ver guion.js): una declaración por papel, con la
+  // geometría del guion para lo que la hoja no diga.
+  const guionActivo = !!(documento.libro && documento.libro.guion);
+  const declGuion = {};
+  for (const [rol, sel] of Object.entries(GUION.SELECTORES)) {
+    const d = declaracionesDe(hoja, ['paragraph', sel], base);
+    if (!declara(sel, 'margin-left') && !declara(sel, 'margin-right')) {
+      const g = GUION.geometriaPorDefecto(rol, geo.anchoColumna * 0.75);
+      if (g.ml) d.ml = g.ml;
+      if (g.mr) d.mr = g.mr;
+    }
+    declGuion[rol] = d;
+  }
   const sangriaVersoPt = (opc.sangriaVersoEm === undefined || opc.sangriaVersoEm === null ? 2 : opc.sangriaVersoEm) * (base.tamano || 12);
   const dialogoGeo = E.sangriaDialogo(hoja, base);
 
@@ -1006,12 +1024,15 @@ function construirTypst(documento, hoja, opciones) {
       switch (b.tipo) {
         case 'heading': {
           const est = computar(padre, declH[b.nivel - 1]);
+          // La portada de un guion: el título, a un tercio de la página.
+          if (guionActivo && b.portada) est.pt = Math.max(est.pt || 0, geo.altoCont * PX * 0.3);
           // «section-break: heading-N»: ese nivel y los superiores abren
           // sección (antes solo se entendía «heading-1»).
           const abre = LIBRO.abreSeccion(seccion, b) && !esPrimeroDelArticulo && !ctx.enCita;
           if (abre) saltoDeSeccion();
           else if (est.saltoAntes) saltoDePagina();
-          emitir(est, b.hijos, { sticky: est.mantener, seccion: abre });
+          // En un guion el titular de escena no se queda solo al pie.
+          emitir(est, b.hijos, { sticky: est.mantener, seccion: abre, pegar: guionActivo && est.mantener });
           if (est.saltoDespues) saltoDePagina();
           anterior = `h${b.nivel}`;
           break;
@@ -1031,6 +1052,51 @@ function construirTypst(documento, hoja, opciones) {
           if (/^h\d$/.test(anterior || '') && declPTrasH) cascada.push(declPTrasH);
           if (ctx.enCita && declCitaP) cascada.push(declCitaP);
           if (b.bibliografia) cascada.push(declBiblio);
+
+          if (b.guion) {
+            // Guion: cada línea en su columna. El personaje y su acotación
+            // no se separan de lo que les sigue; las líneas sangradas con
+            // tabuladores (una réplica que es un dibujo) guardan su sangría.
+            const rol = b.guion.libre ? 'accion' : b.guion.rol;
+            const lineasG = b.lineas || [{ hijos: b.hijos, tabs: 0, espacios: 0 }];
+            const centrar = rol === 'portada' && !declara('script-title', 'text-alignment');
+            const cabeza = b.guion.rol === 'personaje' || b.guion.rol === 'acotacion';
+            // Un dibujo (líneas sangradas o con blancos que cuentan) no se
+            // parte entre páginas; un párrafo de varias líneas, si es corto.
+            const junto =
+              lineasG.length <= 6 || lineasG.some((l) => (l.tabs || 0) > 0 || GUION.esDibujo(l.hijos));
+            // Las réplicas llevan una marca al principio y otra al final:
+            // si cruzan de página, el pie dice «(MÁS)» y la página
+            // siguiente repite el nombre con «(CONT.)».
+            const idReplica = b.guion.rol === 'dialogo' && b.guion.nombre ? replicasGuion++ : null;
+            const marcaReplica = (q) =>
+              `[#metadata((g: ${idReplica}, q: "${q}", n: ${cadena(b.guion.nombre)}))<ul-g>]`;
+            lineasG.forEach((l, k) => {
+              const est = computar(padre, declGuion[rol]);
+              if (centrar) est.alineacion = 'center';
+              if (k > 0) est.pt = 0;
+              if (k < lineasG.length - 1) est.pb = 0;
+              const sl = E.sangriaDeLinea(l, unidadTab);
+              if (sl > 0) {
+                est.ml = (est.ml || 0) + sl;
+                est.sangria = 0;
+              }
+              // Una línea que es un dibujo guarda sus blancos y lleva sus
+              // tabuladores a la parada, en columnas de máquina de escribir.
+              const dibujo = GUION.esDibujo(l.hijos);
+              let hijosG = l.hijos;
+              if (dibujo) hijosG = GUION.aMaquina(l.hijos, sl, unidadTab, est.tamano || base.tamano);
+              emitir(est, hijosG, {
+                preformateado: dibujo,
+                pegar: cabeza || (k < lineasG.length - 1 && junto),
+                indivisible: cabeza,
+                marcaIni: idReplica !== null && k === 0 ? marcaReplica('i') : null,
+                marcaFin: idReplica !== null && k === lineasG.length - 1 ? marcaReplica('f') : null,
+              });
+              anterior = 'p';
+            });
+            break;
+          }
 
           if (b.chat) {
             // Conversación (chat, teatro): un registro al margen, sin
@@ -1649,8 +1715,47 @@ function construirTypst(documento, hoja, opciones) {
     return `context ${condicion}{ let t = ${texto}; let ancho = measure(t).width; ${pos} }`;
   }
 
+  /* --- «(MÁS)» y «NOMBRE (CONT.)» cuando una réplica cruza de página --- */
+  function marcasDeReplica() {
+    if (!guionActivo || !replicasGuion) return 'none';
+    const estP = computar(raiz, declGuion.personaje);
+    const f = fuenteDe(estP);
+    const lh = alturaLinea(estP, f);
+    const caja = cajaLinea(f.metricas, lh);
+    const lhPt = lh * PX;
+    const x = geo.margenes.izquierda + lu(ptApx(estP.ml || 0)) * PX;
+    const arriba = geo.margenes.superior;
+    // La última línea de una página llena: el texto va en una rejilla de
+    // líneas desde el margen superior.
+    const abajo = arriba + Math.floor((geo.altoCont * PX) / lhPt + 1e-6) * lhPt;
+    const texto = (t) =>
+      `text(font: ${cadena(f.familia)}, size: ${ptTypst(f.pxAvances)}, weight: ${f.negrita ? '"bold"' : '"regular"'}, ` +
+      `style: "normal", top-edge: ${ptTypst(caja.ascL)}, bottom-edge: ${ptTypst(-caja.descL)}, ${t})`;
+    return (
+      `context { let p = here().page(); let ini = (:); let fin = (:); ` +
+      `for m in query(<ul-g>) { let v = m.value; let g = str(v.g); ` +
+      `if v.q == "i" { ini.insert(g, (m.location().page(), v.n)) } else { fin.insert(g, m.location().page()) } }; ` +
+      `let mas = false; let sigue = none; ` +
+      `for (g, d) in ini { let pi = d.at(0); let pf = fin.at(g, default: pi); ` +
+      `if pi <= p and p < pf { mas = true }; if pi < p and p <= pf { sigue = d.at(1) } }; ` +
+      `if mas { place(top + left, dx: ${fmt(x)}pt, dy: ${fmt(abajo)}pt, ${texto('"(MÁS)"')}) }; ` +
+      `if sigue != none { place(top + left, dx: ${fmt(x)}pt, dy: ${fmt(arriba - lhPt)}pt, ${texto('upper(sigue) + " (CONT.)"')}) } }`
+    );
+  }
+
   /* --- ensamblado --- */
   E.marcarBibliografia(documento.bloques, opc.encabezadosBibliografia);
+  // Primero el cuerpo: el primer plano de la página depende de lo que
+  // se haya emitido (las réplicas de un guion).
+  emitirBloques(documento.bloques, raiz, { articulo: true });
+  emitirNotas();
+
+  /** Lo que se dibuja encima de cada página: el folio y las marcas. */
+  function primerPlano() {
+    const capas = [piePagina(), marcasDeReplica()].filter((c) => c !== 'none');
+    if (!capas.length) return 'none';
+    return capas.length === 1 ? capas[0] : `{ ${capas.join('; ')} }`;
+  }
 
   // A doble cara, márgenes en espejo: el interior (el izquierdo de la
   // geometría de Chromium) va hacia el lomo. El ancho de la caja no
@@ -1664,7 +1769,7 @@ function construirTypst(documento, hoja, opciones) {
     `#set page(width: ${fmt(geo.anchoPt)}pt, height: ${fmt(geo.altoPt)}pt, ` +
     margenes +
     (geo.columnas > 1 ? `columns: ${geo.columnas}, ` : '') +
-    `header: none, footer: none, foreground: ${piePagina()})` +
+    `header: none, footer: none, foreground: ${primerPlano()})` +
     (geo.columnas > 1 ? `\n#set columns(gutter: ${ptTypst(geo.huecoPx)})` : '');
 
   const fRaiz = fuenteDe(raiz);
@@ -1678,9 +1783,6 @@ function construirTypst(documento, hoja, opciones) {
     `#set block(spacing: 0pt)`,
     `#show link: it => it`,
   ];
-
-  emitirBloques(documento.bloques, raiz, { articulo: true });
-  emitirNotas();
 
   return {
     fuente: cabecera.join('\n') + '\n\n' + salida.join('\n') + '\n',

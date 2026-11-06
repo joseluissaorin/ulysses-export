@@ -3,7 +3,8 @@
 Desde la 2.1 el plugin compone también lo que una hoja `.ulss` no puede
 describir y un libro necesita: imágenes a página completa, capítulos que
 abren en página impar, poemas que no se parten mal, conversaciones de chat
-o de teatro, epígrafes y la raya de diálogo bien puesta.
+o de teatro, epígrafes y la raya de diálogo bien puesta. Desde la 2.2,
+también obras de teatro compuestas como un guion de cine.
 
 Todo sale igual en el **PDF**, en el **DOCX** y en el **HTML**, y funciona
 igual en el móvil, porque es el mismo motor. Nada de esto toca tu nota:
@@ -132,6 +133,57 @@ Para cambiar su aspecto, define `paragraph-chat` en la hoja (ver
 [Crear estilos](guias/03-crear-estilos.md)): por ejemplo, otra tipografía
 para lo que pasa en la pantalla.
 
+## Guion de cine
+
+Desde la 2.2 una obra de teatro escrita como siempre se puede componer
+como un **guion de cine**: Courier a 12 puntos, el nombre del personaje
+en mayúsculas sobre su réplica, las acotaciones entre paréntesis bajo el
+nombre, la réplica en su columna y la acción a todo lo ancho. Se activa
+con un estilo que lo pida (el de ejemplo es
+[`ejemplos/estilos/Guion.ulss`](../ejemplos/estilos/Guion.ulss)), con la
+propiedad `ulysses-guion: true` de la nota, en el diálogo de exportar
+(*Guion de cine*) o con `--guion si` en la terminal.
+
+Lo que reconoce:
+
+| En la nota | En el guion |
+|---|---|
+| `ROSA (sin mirarle): Ya llegó el agua.` | `ROSA`, debajo `(sin mirarle)` y debajo la réplica |
+| `**TOMÁS** *(se despereza)*` y la réplica en la línea siguiente | Lo mismo |
+| Un párrafo entre paréntesis: `(Entra ROSA con un cubo)` | Acción, sin paréntesis y con su punto |
+| Una acotación corta en medio de la réplica: `(Señala)` | Bajo el nombre, entre dos trozos de réplica |
+| Una acotación larga en medio de la réplica (más de 70 caracteres) | Acción a todo lo ancho, y el personaje vuelve con `ROSA (CONT.)` |
+| Cualquier otro párrafo | Acción |
+| El titular 1 del principio y los párrafos que lo siguen | La portada: título y subtítulos centrados, a un tercio de la página |
+
+**Dibujos.** Una línea con tabuladores o con varios espacios seguidos se
+compone como en una máquina de escribir: cada blanco cuenta y los
+tabuladores llevan a su parada, en columnas de 0,6 em, el paso de la
+Courier. Así se sostienen las letras espaciadas, las escaleras y las
+espirales de una partitura escénica. Un dibujo no se parte entre páginas.
+
+**Paginación de guion.** El nombre y su acotación nunca se quedan solos
+al pie, y en el PDF una réplica que cruza de página lleva `(MÁS)` al pie y
+`ROSA (CONT.)` arriba de la siguiente, como en un guion profesional.
+
+**Selectores.** Cada papel tiene el suyo (Ulysses los ignora, así que la
+hoja sigue sirviendo allí):
+
+| Selector | Papel | Si la hoja no da márgenes |
+|---|---|---|
+| `script-title` | Subtítulos de la portada | Centrados |
+| `script-character` | Nombre del personaje | A 2,2 pulgadas del margen |
+| `script-parenthetical` | Acotación bajo el nombre | De 1,6 a 4 pulgadas |
+| `script-dialogue` | Réplica | De 1 a 4,5 pulgadas |
+| `script-action` | Acción y dibujos | A todo lo ancho |
+
+Las medidas son las de un guion en una caja de 6 pulgadas y se escalan al
+ancho de la caja real. Para los nombres y los titulares de escena, el
+plugin entiende además `text-transform: uppercase`.
+
+En [`ejemplos/obra.md`](../ejemplos/obra.md) hay una escena breve y su
+resultado, [`ejemplos/muestra-guion.pdf`](../ejemplos/muestra-guion.pdf).
+
 ---
 
 ## Epígrafes
@@ -188,6 +240,7 @@ anterior:
 | `ulysses-epigrafes` | `true`, `false` |
 | `ulysses-conversaciones` | `true`, `false` |
 | `ulysses-raya-pegada` | `true`, `false` |
+| `ulysses-guion` | `true`, `false` (sin la propiedad, lo decide el estilo) |
 | `ulysses-tamano-pagina` | `a4`, `letter` (o `carta`), `legal` (o `oficio`) |
 | `ulysses-modo-lineas` | `auto`, `verso`, `salto`, `parrafo` |
 | `ulysses-sangria-verso` | Un número, en cuadratines |
@@ -198,7 +251,7 @@ Las claves admiten tildes y mayúsculas (`ulysses-epígrafes` vale igual).
 
 La terminal entiende las mismas propiedades y, además, sus propias
 opciones (`--laminas`, `--doble-cara`, `--epigrafes`,
-`--conversaciones`, `--raya`, `--tamano`):
+`--conversaciones`, `--raya`, `--guion`, `--tamano`):
 
 ```bash
 node scripts/exportar.mjs novela.md Novela.ulss novela.pdf --laminas apaisada
@@ -214,6 +267,11 @@ node scripts/exportar.mjs novela.md Novela.ulss novela.docx
   Los capítulos a doble cara son secciones de Word que empiezan en impar,
   y el documento lleva márgenes simétricos. Word lo pagina igual que el
   PDF.
+- **Guion.** En el DOCX cada papel es un estilo de Word con nombre
+  (*Personaje*, *Diálogo*…), el nombre y la acotación van pegados a lo que
+  les sigue y los dibujos guardan sus blancos. `(MÁS)` y `(CONT.)` al
+  cruzar de página solo existen en el PDF: ni Word ni el navegador saben
+  dónde cae el corte.
 - **HTML y «Imprimir…».** La lámina usa una página con nombre de CSS, sin
   márgenes. Chromium no inserta la página en blanco para que un capítulo
   abra en impar: en esa vía, el capítulo empieza en la página siguiente,

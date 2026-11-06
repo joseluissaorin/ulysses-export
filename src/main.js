@@ -455,6 +455,7 @@ class UlyssesExport extends Plugin {
       epigrafes: a.epigrafes,
       conversaciones: a.conversaciones,
       rayaPegada: a.rayaPegada,
+      guion: a.guion,
       recursos: (ruta) => recursos.get(ruta) || null,
       recursoUrl: (ruta) => {
         const r = recursos.get(ruta);
@@ -746,6 +747,8 @@ class DialogoExportar extends Modal {
       epigrafes: !!ajustes.epigrafes,
       conversaciones: ajustes.conversaciones !== false,
       rayaPegada: ajustes.rayaPegada !== false,
+      // null: lo decide el estilo (los que traen «script-…», como Guion)
+      guion: ajustes.guion === true || ajustes.guion === false ? ajustes.guion : null,
     };
     await this.pintar();
   }
@@ -1033,6 +1036,22 @@ class DialogoExportar extends Modal {
           this.eleccion.rayaPegada = v;
         })
       );
+
+    new Setting(contentEl)
+      .setName('Guion de cine')
+      .setDesc(
+        'La obra de teatro como un guion: el nombre en mayúsculas sobre la ' +
+          'réplica, las acotaciones debajo y la acción a todo lo ancho. «Según ' +
+          'el estilo» lo activa con los estilos que lo traen, como Guion.' +
+          deNota('guion')
+      )
+      .addDropdown((d) => {
+        d.addOption('estilo', 'Según el estilo').addOption('si', 'Sí').addOption('no', 'No');
+        d.setValue(this.eleccion.guion === true ? 'si' : this.eleccion.guion === false ? 'no' : 'estilo');
+        d.onChange((v) => {
+          this.eleccion.guion = v === 'si' ? true : v === 'no' ? false : null;
+        });
+      });
   }
 
   /**
@@ -1234,7 +1253,7 @@ class AjustesExport extends PluginSettingTab {
         'exportación, y cada nota puede fijar los suyos en sus propiedades: ' +
         '«ulysses-estilo», «ulysses-laminas» (girada, apaisada o no), ' +
         '«ulysses-doble-cara», «ulysses-epigrafes», «ulysses-conversaciones», ' +
-        '«ulysses-raya-pegada» y «ulysses-tamano-pagina».',
+        '«ulysses-raya-pegada», «ulysses-guion» y «ulysses-tamano-pagina».',
     });
 
     new Setting(containerEl)

@@ -8,6 +8,7 @@ const D = require('./docx.js');
 const MD = require('./markdown.js');
 const ULSS = require('./ulss.js');
 const LIBRO = require('./libro.js');
+const GUION = require('./guion.js');
 
 const MM = 72 / 25.4;
 // Ulysses redondea A4 a puntos enteros: 595 x 842 pt (11900 x 16840
@@ -222,6 +223,54 @@ function estiloDe(bloque) {
     default:
       return null;
   }
+}
+
+/*
+ * Guion
+ * =====
+ *
+ * Una obra compuesta como guion de cine (ver guion.js): cada papel con su
+ * estilo «script-…» y, si la hoja no da sangrías, la geometría del guion.
+ * Un dibujo (líneas con blancos que cuentan) se compone como en una
+ * máquina de escribir: con letra de paso fijo, a 0,6 em por columna.
+ */
+function papelGuion(bloque) {
+  return bloque.guion.libre ? 'accion' : bloque.guion.rol;
+}
+
+function atributosGuion(hoja, base, rol, anchoUtil) {
+  const sel = GUION.SELECTORES[rol];
+  const declara = (p) => !!hoja.prop(sel, p);
+  const a = D.atributos(hoja, ['paragraph', sel], Object.assign({}, base));
+  if (!declara('margin-left') && !declara('margin-right')) {
+    const g = GUION.geometriaPorDefecto(rol, anchoUtil);
+    a.margenIzquierdo = g.ml || 0;
+    a.margenDerecho = g.mr || 0;
+  }
+  if (!declara('first-line-indent')) a.sangriaPrimera = 0;
+  if (rol === 'portada' && !declara('text-alignment')) a.alineacion = 'center';
+  return a;
+}
+
+/** Las líneas de un bloque de guion: sangría, blancos y si van pegadas. */
+function lineasGuion(bloque, unidadTab, tamano) {
+  const lineas = bloque.lineas || [{ hijos: bloque.hijos, tabs: 0, espacios: 0 }];
+  const cabeza = bloque.guion.rol === 'personaje' || bloque.guion.rol === 'acotacion';
+  const junto = lineas.length <= 6 || lineas.some((l) => (l.tabs || 0) > 0 || GUION.esDibujo(l.hijos));
+  return lineas.map((l, k) => {
+    const sangria = sangriaDeLinea(l, unidadTab);
+    const dibujo = GUION.esDibujo(l.hijos);
+    const hijos = dibujo ? GUION.aMaquina(l.hijos, sangria, unidadTab, tamano) : l.hijos;
+    return {
+      hijos,
+      sangria,
+      dibujo,
+      primera: k === 0,
+      ultima: k === lineas.length - 1,
+      pegada: cabeza || (k < lineas.length - 1 && junto),
+      entera: cabeza,
+    };
+  });
 }
 
 /** Selectores que aplican a cada tipo de bloque, del generico al concreto. */
@@ -646,6 +695,8 @@ function construirDocx(documento, hoja, opciones) {
           const abre = LIBRO.abreSeccion(saltoSeccion, bloque) && hayContenido && !dentroDeCita;
           if (abre && seccionesReales) abrirSeccion(seccionNormal(dosCaras ? 'oddPage' : 'nextPage'));
           else if (abre) atrs.saltoPagina = 'before';
+          // La portada de un guion: el título, a un tercio de la página.
+          if (bloque.portada) atrs.margenSuperior = Math.max(atrs.margenSuperior || 0, altoUtil * 0.3);
           parrafo(bloque.hijos, atrs, {
             keepNext: true,
             pStyle: nombreEstilo(hoja, sels, estiloDe(bloque)),
@@ -681,6 +732,27 @@ function construirDocx(documento, hoja, opciones) {
           const lineas = bloque.lineas || [{ hijos: bloque.hijos, tabs: 0, espacios: 0 }];
           const modo = modoDeLineas(bloque, opc);
           const nombre = nombreEstilo(hoja, sels, null);
+
+          // Guion: cada línea en su columna; el personaje y su acotación
+          // no se separan de lo que les sigue.
+          if (bloque.guion) {
+            const rol = papelGuion(bloque);
+            const sel = GUION.SELECTORES[rol];
+            const a0 = atributosGuion(hoja, base, rol, anchoUtil);
+            if (sangriaExtra) a0.margenIzquierdo = (a0.margenIzquierdo || 0) + sangriaExtra;
+            const nombreG = nombreEstilo(hoja, ['paragraph', sel], null);
+            for (const l of lineasGuion(bloque, unidadTab, a0.tamano || base.tamano)) {
+              const a = Object.assign({}, a0);
+              if (!l.primera) a.margenSuperior = 0;
+              if (!l.ultima) a.margenInferior = 0;
+              if (l.sangria > 0) a.margenIzquierdo = (a.margenIzquierdo || 0) + l.sangria;
+              parrafo(l.hijos, a, Object.assign(nombreG ? { pStyle: nombreG } : {}, { keepNext: l.pegada, keepLines: l.entera }));
+            }
+            hayContenido = true;
+            indiceParrafo++;
+            trasTitular = false;
+            break;
+          }
 
           // Conversación (chat, teatro): al margen, sin aire entre turnos,
           // sin justificar y con sangría francesa. «paragraph-chat» manda.
@@ -844,7 +916,8 @@ function construirDocx(documento, hoja, opciones) {
             parrafo([{ tipo: 'texto', valor: texto }], atrsDiv, {
               pStyle: nombreEstilo(hoja, ['paragraph-divider'], 'Separador'),
             });
-          } else if (!texto && salto !== 'after' && salto !== 'before') {
+          } else if (visible && !texto && salto !== 'after' && salto !== 'before') {
+            // Un divisor oculto («visibility: hidden») no deja raya.
             cuerpo.push(
               `<w:p><w:pPr><w:pBdr><w:bottom w:val="single" w:sz="6" w:space="1" w:color="auto"/></w:pBdr></w:pPr></w:p>`
             );
@@ -1174,6 +1247,25 @@ function estilosXml(hoja, base) {
     ['Lista numerada', ['paragraph', 'list-all', 'list-ordered']],
   ];
 
+  // Los nombres que pone la hoja («style-title») también son estilos:
+  // los párrafos los referencian (ver nombreEstilo) y tienen que existir.
+  const usados = new Set(parrafos.map(([n]) => n));
+  const conNombre = [
+    ...[1, 2, 3, 4, 5, 6].map((n) => ['heading-all', `heading-${n}`]),
+    ['paragraph'],
+    ['paragraph', 'paragraph :first'],
+    ['paragraph', 'paragraph + paragraph'],
+    ['paragraph', 'heading-all + paragraph'],
+    ['paragraph', 'paragraph-bibliography'],
+    ...Object.values(GUION.SELECTORES).map((sel) => ['paragraph', sel]),
+  ];
+  for (const selectores of conNombre) {
+    const nombre = nombreEstilo(hoja, selectores, null);
+    if (!nombre || usados.has(nombre)) continue;
+    usados.add(nombre);
+    parrafos.push([nombre, selectores]);
+  }
+
   for (const [nombre, selectores] of parrafos) {
     const a = D.atributos(hoja, selectores, Object.assign({}, base));
     estilos.push(
@@ -1467,6 +1559,11 @@ function pilaTipografica(familia) {
   const primera = familia.split(',')[0].trim().replace(/^["']|["']$/g, '');
   const sustituto = SUSTITUTOS[primera.toLowerCase()];
   if (sustituto) return sustituto;
+  // Letra de máquina de escribir (un guion): la reserva también, o los
+  // dibujos y las columnas del guion se descuadran.
+  if (/courier|mono|typewriter|prestige|pica/i.test(primera)) {
+    return `"${primera}", "Courier Prime", "Courier New", "Liberation Mono", Courier, monospace`;
+  }
   return `"${primera}", serif`;
 }
 
@@ -1692,6 +1789,32 @@ function construirCss(hoja, opciones) {
   reglas.push(`.ulysses p.continuacion { padding-top: 0; }`);
   reglas.push(`.ulysses p.continuacion:not(.verso) { text-indent: 0; }`);
 
+  if (opc && opc.guionActivo) {
+    // Guion (ver guion.js): un estilo por papel, con la geometría del
+    // guion de cine si la hoja no da sangrías; los dibujos guardan sus
+    // blancos y el personaje no se queda solo al pie.
+    const anchoUtil = pagina.ancho - pagina.interior - pagina.exterior;
+    for (const rol of Object.keys(GUION.SELECTORES)) {
+      const a = atributosGuion(hoja, base, rol, anchoUtil);
+      const decl = [];
+      decl.push(`padding-top: ${pt(a.margenSuperior || 0)}`, `padding-bottom: ${pt(a.margenInferior || 0)}`);
+      decl.push('margin-top: 0', 'margin-bottom: 0');
+      decl.push(`margin-left: ${pt(a.margenIzquierdo || 0)}`, `margin-right: ${pt(a.margenDerecho || 0)}`);
+      decl.push(`text-indent: ${pt(a.sangriaPrimera || 0)}`);
+      if (a.alineacion) decl.push(`text-align: ${a.alineacion === 'both' ? 'justify' : a.alineacion}`);
+      if (a.negrita !== null && a.negrita !== undefined) decl.push(`font-weight: ${a.negrita ? 'bold' : 'normal'}`);
+      if (a.cursiva !== null && a.cursiva !== undefined) decl.push(`font-style: ${a.cursiva ? 'italic' : 'normal'}`);
+      if (a.color) decl.push(`color: ${a.color}`);
+      reglas.push(`.ulysses p.guion-${rol} { ${decl.join('; ')} }`);
+    }
+    reglas.push(`.ulysses p.guion.guion-sigue { padding-top: 0; }`);
+    reglas.push(`.ulysses p.guion.guion-antes { padding-bottom: 0; }`);
+    reglas.push(`.ulysses p.guion.pegado { break-after: avoid; }`);
+    reglas.push(`.ulysses p.guion.entero { break-inside: avoid; }`);
+    reglas.push(`.ulysses p.guion-dibujo { white-space: pre-wrap; }`);
+    const altoUtil = pagina.alto - pagina.superior - pagina.inferior;
+    reglas.push(`.ulysses h1.portada { padding-top: ${pt(altoUtil * 0.3)}; }`);
+  }
   {
     // Conversaciones (chat, teatro): al margen, sin aire entre turnos,
     // sin justificar y con sangría francesa. «paragraph-chat» manda.
@@ -1942,7 +2065,7 @@ function bloquesHtml(bloques, opc) {
   lista.forEach((b, idx) => {
     switch (b.tipo) {
       case 'heading':
-        s += `<h${b.nivel}>${inlineHtml(b.hijos, opc)}</h${b.nivel}>`;
+        s += `<h${b.nivel}${b.portada ? ' class="portada"' : ''}>${inlineHtml(b.hijos, opc)}</h${b.nivel}>`;
         break;
       case 'lamina': {
         // Lámina: página propia. En pantalla, la imagen a todo el ancho;
@@ -1960,6 +2083,22 @@ function bloquesHtml(bloques, opc) {
         const clase = b.bibliografia ? ' class="bibliografia"' : '';
         const lineas = b.lineas || [{ hijos: b.hijos, tabs: 0, espacios: 0 }];
         const modo = modoDeLineas(b, opc);
+
+        // Guion: cada línea, un párrafo de su papel (ver el CSS).
+        if (b.guion) {
+          const rol = papelGuion(b);
+          for (const l of lineasGuion(b, (opc && opc.unidadTabPt) || 0, opc && opc.tamanoBase)) {
+            const c = ['guion', `guion-${rol}`];
+            if (!l.primera) c.push('guion-sigue');
+            if (!l.ultima) c.push('guion-antes');
+            if (l.pegada) c.push('pegado');
+            if (l.entera) c.push('entero');
+            if (l.dibujo) c.push('guion-dibujo');
+            const sang = l.sangria > 0 ? ` style="padding-left:${Math.round(l.sangria * 100) / 100}pt"` : '';
+            s += `<p class="${c.join(' ')}"${sang}>${inlineHtml(l.hijos, opc)}</p>`;
+          }
+          break;
+        }
 
         // Conversación: cada línea, un párrafo «chat» (ver el CSS).
         if (b.chat) {
@@ -2160,6 +2299,8 @@ function construirHtml(documento, hoja, opciones) {
   const opcConTab = Object.assign({}, opc, {
     esDialogo: (b) => bloqueEsDialogo(b, opc),
     unidadTabPt: anchoTabulador(hoja, base, opc),
+    tamanoBase: base.tamano || 12,
+    guionActivo: !!(documento.libro && documento.libro.guion),
     divisor,
     paginaApaisada: paginaDoc.ancho > paginaDoc.alto,
     seccionDivisor: LIBRO.saltoDeSeccion(paginaDoc.saltoSeccion).divisor,

@@ -9,6 +9,7 @@
 //   --laminas girada|apaisada|no
 //   --doble-cara si|no|estilo
 //   --epigrafes si|no      --conversaciones si|no      --raya si|no
+//   --guion si|no          compone la obra como un guion (si no, lo decide la hoja)
 //   --typ salida.typ       guarda la fuente Typst (solo PDF)
 //   --una-pasada           sin la segunda pasada de ajuste fino (solo PDF)
 //
@@ -58,6 +59,7 @@ for (let i = 0; i < args.length; i++) {
   else if (a === '--epigrafes') opc.cambios.epigrafes = elegir(a, args[++i], SI_NO);
   else if (a === '--conversaciones') opc.cambios.conversaciones = elegir(a, args[++i], SI_NO);
   else if (a === '--raya') opc.cambios.rayaPegada = elegir(a, args[++i], SI_NO);
+  else if (a === '--guion') opc.cambios.guion = elegir(a, args[++i], SI_NO);
   else if (a.startsWith('--')) {
     console.error(`Opción desconocida: ${a}`);
     process.exit(2);
@@ -144,6 +146,7 @@ const opciones = {
   epigrafes: ajustes.epigrafes,
   conversaciones: ajustes.conversaciones,
   rayaPegada: ajustes.rayaPegada,
+  guion: ajustes.guion,
   recursos: recurso,
   recursoUrl: (ruta) => {
     const r = recurso(ruta);

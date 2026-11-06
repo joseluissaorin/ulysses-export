@@ -28,6 +28,12 @@ diálogo de impresión ni de un navegador, lo compone el propio plugin con
   página impar a doble cara, estrofas que no se parten, conversaciones de
   chat o de teatro, epígrafes y la raya de diálogo pegada, como pide el
   DPD. Todo en **[`docs/libro.md`](docs/libro.md)**.
+- **Guion de cine** (desde la 2.2): una obra de teatro escrita como
+  siempre (`NOMBRE (acotación): réplica`) sale como un guion, con portada,
+  nombres, acotaciones, columnas de réplica y de acción, dibujos a máquina
+  que conservan cada blanco y `(MÁS)` / `(CONT.)` cuando una réplica cruza
+  de página. Lo activa un estilo con selectores `script-…`, como
+  `ejemplos/estilos/Guion.ulss`.
 
 ## El renderizador de PDF
 
@@ -108,13 +114,15 @@ exportes un PDF.
 ### Ejemplos
 
 En [`ejemplos/`](ejemplos/) hay una nota de muestra exportada con dos
-estilos distintos, con el `.md` de partida y los PDF resultantes:
+estilos distintos, una pieza de libro y una escena de teatro, con el `.md`
+de partida y los PDF resultantes:
 
 | Nota | Estilo | Resultado |
 |---|---|---|
 | [`muestra.md`](ejemplos/muestra.md) | Novela (Baskerville, sangrías, `*****`) | [`muestra-novela.pdf`](ejemplos/muestra-novela.pdf) |
 | [`muestra.md`](ejemplos/muestra.md) | Universidad (Optima, justificado, notas al pie) | [`muestra-universidad.pdf`](ejemplos/muestra-universidad.pdf) |
 | [`libro.md`](ejemplos/libro.md) | Novela a doble cara, con lámina, chat, poema y epígrafe | [`muestra-libro.pdf`](ejemplos/muestra-libro.pdf) |
+| [`obra.md`](ejemplos/obra.md) | Guion (Courier Prime, portada, personajes, acción y un dibujo) | [`muestra-guion.pdf`](ejemplos/muestra-guion.pdf) |
 
 ## Desarrollo
 
@@ -133,6 +141,7 @@ El código está organizado por módulos en `src/`:
 | `ulss.js` | Parser del formato `.ulss` (variables, mixins, herencia) |
 | `markdown.js` | Markdown → árbol de bloques (con líneas y sangrías) |
 | `libro.js` | Composición de libro: láminas, secciones, poemas, conversaciones, epígrafes, raya |
+| `guion.js` | Guion de cine: portada, turnos, acotaciones, acción y dibujos a máquina |
 | `imagenes.js` | Tamaño de las imágenes (PNG, JPEG, GIF, SVG) sin decodificarlas |
 | `docx.js` | Emisor OOXML |
 | `typst.js` | **Emisor Typst con el modelo de caja de Chromium** |

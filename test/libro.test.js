@@ -410,3 +410,96 @@ test('poesía: una lámina a mitad del poema no lo corta', () => {
   assert.ok(doc.bloques.some((b) => b.tipo === 'lamina'));
   assert.strictEqual(doc.bloques.find((b) => b.tipo === 'paragraph' && MD.aTextoPlano(b.hijos) === '23:19').versoSuelto, true);
 });
+
+/* ------------------------------------------------------------------ */
+/* Guion                                                               */
+
+const GUION = require('../src/guion.js');
+const HOJA_GUION = `
+document-settings { page-inset-top: 25mm; page-inset-bottom: 25mm; page-inset-inner: 38mm; page-inset-outer: 25mm }
+defaults { font-family: "Courier Prime"; font-size: 12pt; line-height: 12pt }
+paragraph { margin-top: 12pt; default-tab-interval: 14.4pt }
+heading-2 { page-break: before }
+heading-3 { text-transform: uppercase }
+script-character { style-title: "Personaje"; text-transform: uppercase; margin-top: 12pt }
+script-dialogue { margin-top: 0pt }
+area-footer { content: page-number; text-alignment: right }
+`;
+const OBRA = [
+  '# La obra', '*(o el subtítulo)*', '',
+  '## Acto primero', '',
+  '### Escena 1. Una cocina', '',
+  '(Entra ROSA con un cubo)', '',
+  'ROSA (sin mirarle): Ya llegó el agua. (Deja el cubo en el suelo, se seca las manos en el delantal, ' +
+    'mira al techo y cuenta las goteras una por una) Doce.', '',
+  '**TOMÁS** *(desde la puerta)*', 'Trece. (Señala) Y esa.', '',
+  '\t\tt i c   t a c\ttoc',
+].join('\n');
+
+test('guion: portada, turnos, acotaciones y acción', () => {
+  const doc = LIBRO.preparar(MD.analizar(OBRA), ULSS.cargar(HOJA_GUION), {});
+  assert.strictEqual(doc.libro.guion, true);
+  const vista = doc.bloques.map((b) =>
+    b.tipo === 'heading' ? `h${b.nivel}${b.portada ? '*' : ''} ${GUION.plano(b.hijos)}` : `${b.guion.rol} ${GUION.plano(b.hijos)}`);
+  assert.deepStrictEqual(vista, [
+    'h1* La obra',
+    'portada (o el subtítulo)',
+    'h2 Acto primero',
+    'h3 ESCENA 1. UNA COCINA',
+    'accion Entra ROSA con un cubo.',
+    'personaje ROSA',
+    'acotacion (sin mirarle)',
+    'dialogo Ya llegó el agua.',
+    'accion Deja el cubo en el suelo, se seca las manos en el delantal, mira al techo y cuenta las goteras una por una.',
+    'personaje ROSA (CONT.)',
+    'dialogo Doce.',
+    'personaje TOMÁS',
+    'acotacion (desde la puerta)',
+    'dialogo Trece.',
+    'acotacion (Señala)',
+    'dialogo Y esa.',
+    'accion t i c   t a c\ttoc',
+  ]);
+  assert.strictEqual(doc.bloques[7].guion.nombre, 'ROSA');
+  // Sin estilos «script-…» no hay guion, salvo que se pida; y se puede apagar.
+  assert.strictEqual(LIBRO.preparar(MD.analizar(OBRA), ULSS.cargar(NOVELA), {}).libro.guion, false);
+  assert.strictEqual(LIBRO.preparar(MD.analizar(OBRA), ULSS.cargar(NOVELA), { guion: true }).libro.guion, true);
+  assert.strictEqual(LIBRO.preparar(MD.analizar(OBRA), ULSS.cargar(HOJA_GUION), { guion: false }).libro.guion, false);
+});
+
+test('guion: los dibujos se componen como a máquina', () => {
+  const t = (s) => [{ tipo: 'texto', valor: s }];
+  assert.strictEqual(GUION.esDibujo(t('t i c   t a c')), true);
+  assert.strictEqual(GUION.esDibujo(t('toc\ttoc')), true);
+  assert.strictEqual(GUION.esDibujo(t('Una frase normal, con comas.')), false);
+  // Tabuladores a su parada, contando desde la columna de la línea
+  assert.strictEqual(GUION.plano(GUION.expandirTabuladores(t('toc\ttoc\t\ttoc'), 8, 2)), 'toc toc   toc');
+  assert.strictEqual(GUION.plano(GUION.expandirTabuladores(t('ab\tc'), 0, 4)), 'ab  c');
+});
+
+test('emisor typst: guion con portada, columnas y «(MÁS)» / «(CONT.)»', () => {
+  const r = TYPST.construirTypst(MD.analizar(OBRA), ULSS.cargar(HOJA_GUION), { tamanoPagina: 'a4' });
+  // Cada réplica lleva su marca de principio y de fin con el nombre
+  assert.match(r.fuente, /metadata\(\(g: 0, q: "i", n: "ROSA"\)\)<ul-g>/);
+  assert.match(r.fuente, /metadata\(\(g: 0, q: "f", n: "ROSA"\)\)<ul-g>/);
+  // y el primer plano de la página pone los avisos
+  assert.match(r.fuente, /foreground: \{ context [^\n]*; context [^\n]*"\(MÁS\)"[^\n]*" \(CONT\.\)"/);
+  // El dibujo guarda sus blancos y lleva el tabulador a la parada
+  assert.match(r.fuente, /"t i c   t a c toc"/);
+  // El personaje no se separa de lo que le sigue
+  assert.match(r.fuente, /breakable: false, sticky: true[^\n]*\n[^\n]*\n[^\n]*\n[^\n]*"ROSA"/);
+});
+
+test('DOCX y HTML: guion', () => {
+  const hoja = ULSS.cargar(HOJA_GUION);
+  const x = descomprimir(E.construirDocx(MD.analizar(OBRA), hoja, { tamanoPagina: 'a4' }));
+  // Estilo con nombre, declarado, pegado a la réplica y sin partirse
+  assert.match(x, /<w:style w:type="paragraph" w:styleId="Personaje">/);
+  assert.match(x, /<w:pStyle w:val="Personaje"\/><w:keepNext\/><w:keepLines\/><w:spacing [^>]*\/><w:ind w:left="3046"\/>/);
+  assert.match(x, /t i c   t a c toc/);
+  const html = E.construirHtml(MD.analizar(OBRA), hoja, { tamanoPagina: 'a4' });
+  assert.match(html, /<h1 class="portada">/);
+  assert.match(html, /<p class="guion guion-personaje pegado entero">ROSA<\/p>/);
+  assert.match(html, /class="guion guion-accion guion-dibujo" style="padding-left:28\.8pt">t i c   t a c toc/);
+  assert.match(html, /\.ulysses p\.guion-dibujo \{ white-space: pre-wrap; \}/);
+});

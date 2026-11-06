@@ -135,6 +135,7 @@ admitidas son `pt`, `mm`, `cm`, `in`, `em` y `%`.
 | `underline`, `strikethrough` | `single`, `none` |
 | `text-alignment` | `left`, `right`, `center`, `justified` |
 | `visibility` | `visible`, `hidden` (para ocultar comentarios, etiquetas…) |
+| `text-transform` | `uppercase` — solo en titulares y en los selectores de guion (extensión del plugin) |
 
 **Espaciado y párrafo**
 
@@ -288,6 +289,12 @@ reproduce esa rareza para que las listas queden donde deben.
   declarar: a la derecha, en el 60 % final de la caja y un 10 % más
   pequeños. Admite `margin-left`, `font-size`, `text-alignment`,
   `font-slant`…
+- `script-title`, `script-character`, `script-parenthetical`,
+  `script-dialogue`, `script-action` — los papeles de un guion de cine:
+  subtítulos de portada, personaje, acotación, réplica y acción. Basta con
+  declarar uno para que la obra se componga como guion; los márgenes que
+  no declares toman las medidas de un guion. Ver el estilo
+  `ejemplos/estilos/Guion.ulss`.
 
 Ulysses ignora estos selectores, así que puedes dejarlos en una hoja que
 también uses en Ulysses. Más en **[Novelas y libros](../libro.md)**.

@@ -28,6 +28,7 @@
  */
 
 const MD = require('./markdown.js');
+const GUION = require('./guion.js');
 
 // ensamblado.js también usa este módulo: se pide al llamar, cuando los
 // dos ya están cargados, para no depender del orden de los require.
@@ -55,6 +56,8 @@ function opcionesLibro(opc) {
     conversaciones: o.conversaciones !== false,
     rayaPegada: o.rayaPegada !== false && (!o.idioma || /^es/i.test(o.idioma)),
     seccionesEnVerso: o.seccionesEnVerso !== false,
+    // Guion de cine: true/false lo fuerza; sin decir, lo decide la hoja.
+    guion: o.guion === true ? true : o.guion === false ? false : null,
   };
 }
 
@@ -300,7 +303,7 @@ function esBorrador(nodos) {
 }
 
 function clasificarChat(bloque, opc) {
-  if (bloque.tipo !== 'paragraph' || E().bloqueEsDialogo(bloque, opc)) return null;
+  if (bloque.tipo !== 'paragraph' || bloque.guion || E().bloqueEsDialogo(bloque, opc)) return null;
   const lineas = bloque.lineas || [{ hijos: bloque.hijos }];
   const turnos = lineas.map((l) => turnoDe(l.hijos));
   if (turnos.every(Boolean)) return { tipo: 'turno', turnos };
@@ -370,7 +373,7 @@ function marcarVerso(bloques, opc) {
   const ens = E();
   const sangrada = (l) => (l.tabs || 0) + (l.espacios || 0) > 0;
   for (const tramo of tramos(bloques)) {
-    const parrafos = tramo.filter((b) => b.tipo === 'paragraph' && !b.chat && !ens.bloqueEsDialogo(b, opc));
+    const parrafos = tramo.filter((b) => b.tipo === 'paragraph' && !b.chat && !b.guion && !ens.bloqueEsDialogo(b, opc));
     const versos = parrafos.filter((b) => (b.lineas || []).length > 1 && ens.modoDeLineas(b, opc) === 'verso');
     if (versos.length < 3 || versos.length < 0.6 * parrafos.length) continue;
     const lineas = versos.flatMap((b) => b.lineas);
@@ -502,6 +505,7 @@ const CLAVES_NOTA = {
   'modo-lineas': ['modoLineas', deLista(['auto', 'verso', 'salto', 'parrafo'])],
   'sangria-verso': ['sangriaVersoEm', aNumero],
   comentarios: ['incluirComentarios', aBooleano],
+  guion: ['guion', aBooleano],
   'numero-inicial': ['numeroInicial', aNumero],
   'desde-pagina': ['desdePagina', aNumero],
 };
@@ -519,6 +523,37 @@ function ajustesDeNota(propiedades) {
     if (v !== undefined) r[def[0]] = v;
   }
   return r;
+}
+
+/* ------------------------------------------------------------------ *
+ * Mayúsculas («text-transform: uppercase» en la hoja)
+ * ------------------------------------------------------------------ */
+
+/**
+ * Los titulares y el nombre del personaje de un guion pueden pedir
+ * mayúsculas en la hoja (como el «text-transform» de CSS; Ulysses no lo
+ * conoce y lo ignora). Se aplica aquí, al texto, para que los tres
+ * emisores lo compongan igual y midan lo que de verdad se imprime.
+ */
+function mayusculas(bloques, hoja) {
+  const pide = (sel) => {
+    const v = hoja && hoja.palabra ? hoja.palabra(sel, 'text-transform', null) : null;
+    return v === 'uppercase';
+  };
+  const titulares = [1, 2, 3, 4, 5, 6].map((n) => pide(`heading-${n}`) || (pide('heading-all') && !hoja.prop(`heading-${n}`, 'text-transform')));
+  const roles = {};
+  for (const [rol, sel] of Object.entries(GUION.SELECTORES)) roles[rol] = pide(sel);
+  if (!titulares.some(Boolean) && !Object.values(roles).some(Boolean)) return bloques;
+  return bloques.map((b) => {
+    if (b.tipo === 'heading' && titulares[b.nivel - 1]) return Object.assign({}, b, { hijos: GUION.aMayusculas(b.hijos) });
+    if (b.tipo === 'paragraph' && b.guion && roles[b.guion.rol]) {
+      return Object.assign({}, b, {
+        hijos: GUION.aMayusculas(b.hijos),
+        lineas: (b.lineas || []).map((l) => Object.assign({}, l, { hijos: GUION.aMayusculas(l.hijos) })),
+      });
+    }
+    return b;
+  });
 }
 
 /* ------------------------------------------------------------------ *
@@ -552,11 +587,15 @@ function preparar(documento, hoja, opc) {
   let bloques = extraerLaminas(documento.bloques || [], decidir);
 
   if (o.rayaPegada) pegarRaya(bloques);
+  // Guion antes que las conversaciones: un turno de teatro ya no es chat.
+  const guion = GUION.activo(hoja, { guion: o.guion });
+  if (guion) bloques = GUION.marcarGuion(bloques);
+  bloques = mayusculas(bloques, hoja);
   if (o.conversaciones) marcarConversaciones(bloques, opc);
   if (o.seccionesEnVerso) marcarVerso(bloques, opc);
   if (o.epigrafes) marcarEpigrafes(bloques);
 
-  return Object.assign({}, documento, { bloques, libro: o });
+  return Object.assign({}, documento, { bloques, libro: Object.assign({}, o, { guion }) });
 }
 
 module.exports = {

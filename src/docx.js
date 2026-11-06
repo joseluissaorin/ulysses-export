@@ -367,6 +367,7 @@ function propiedadesParrafo(a, base, extra) {
     );
   }
   if (a.mantenerJunto || (extra && extra.keepNext)) p.push('<w:keepNext/>');
+  if (extra && extra.keepLines) p.push('<w:keepLines/>');
 
   const ind = [];
   if (a.margenIzquierdo) ind.push(`w:left="${twips(a.margenIzquierdo)}"`);
