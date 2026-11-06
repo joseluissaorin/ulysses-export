@@ -165,3 +165,27 @@ test('faltanGeneros detecta un catálogo incompleto', () => {
   const soloSerif = { tieneFamilia: (f) => f === 'Tinos' };
   assert.strictEqual(MOTOR.faltanGeneros(soloSerif), true);
 });
+
+/** Árbol inline como cadena: <s>…</s> negrita, <e>…</e> cursiva. */
+function inlinePlano(nodos) {
+  return (nodos || [])
+    .map((n) => (n.tipo === 'texto' ? n.valor : n.hijos ? `<${n.tipo[0]}>${inlinePlano(n.hijos)}</${n.tipo[0]}>` : `[${n.tipo}]`))
+    .join('');
+}
+
+test('markdown: énfasis anidado como en CommonMark', () => {
+  const casos = [
+    ['*(Entra **DON JUAN** por la izquierda)*', '<e>(Entra <s>DON JUAN</s> por la izquierda)</e>'],
+    ['*de *Un, dos, tres* en la tele*', '<e>de <e>Un, dos, tres</e> en la tele</e>'],
+    ['**muy *poco* claro**', '<s>muy <e>poco</e> claro</s>'],
+    ['*em **strong***', '<e>em <s>strong</s></e>'],
+    ['**strong *em***', '<s>strong <e>em</e></s>'],
+    ['*a *b c*', '*a <e>b c</e>'],
+    ['mi_tesis_final y _bien_', 'mi_tesis_final y <e>bien</e>'],
+    ['2 * 3 * 4', '2 * 3 * 4'],
+    ['*a**', '<e>a</e>*'],
+  ];
+  for (const [entrada, esperado] of casos) {
+    assert.strictEqual(inlinePlano(MD.analizarInline(entrada)), esperado, entrada);
+  }
+});

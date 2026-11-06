@@ -310,8 +310,18 @@ function analizarInline(texto) {
 
 const ALFANUMERICO = /[\p{L}\p{N}]/u;
 
-/** Busca la marca de cierre respetando los escapes y el codigo inline. */
+/**
+ * Busca la marca de cierre respetando los escapes, el codigo inline y,
+ * con «*» y «_», los enfasis anidados. Una cursiva no se cierra en la
+ * negrita que lleva dentro («*(Entra **DON JUAN** por la izquierda)*»),
+ * ni una negrita en la cursiva («**muy *poco* claro**»), y una cursiva
+ * dentro de otra se salta entera («*de *Un, dos, tres* en la tele*»),
+ * como en CommonMark y en Obsidian. Antes se cerraba en el primer
+ * asterisco que encontraba y el resto salia con los asteriscos a la vista.
+ */
 function buscarCierre(texto, desde, marca) {
+  const letra = marca[0];
+  if (letra === '*' || letra === '_') return buscarCierreEnfasis(texto, desde, marca);
   let i = desde;
   while (i < texto.length) {
     if (texto[i] === '\\') {
@@ -337,6 +347,59 @@ function buscarCierre(texto, desde, marca) {
       return i;
     }
     i++;
+  }
+  return -1;
+}
+
+/**
+ * Cierre de un enfasis con «*» o «_». Se recorre el texto por rachas de
+ * la misma letra: una racha pegada a lo de delante (no precedida de
+ * blanco) puede cerrar; una racha seguida de algo que no es blanco puede
+ * abrir un enfasis de dentro, y entonces se salta hasta SU cierre. Si
+ * una racha que podria abrir no tiene cierre, es texto y se sigue.
+ */
+function buscarCierreEnfasis(texto, desde, marca) {
+  const letra = marca[0];
+  const n = texto.length;
+  let i = desde;
+  while (i < n) {
+    const c = texto[i];
+    if (c === '\\') {
+      i += 2;
+      continue;
+    }
+    if (c === '`') {
+      const cierre = texto.indexOf('`', i + 1);
+      i = cierre === -1 ? i + 1 : cierre + 1;
+      continue;
+    }
+    if (c !== letra) {
+      i++;
+      continue;
+    }
+    let racha = 0;
+    while (texto[i + racha] === letra) racha++;
+    if (i === desde && racha >= marca.length) return -1; // marca vacia
+    const antes = i > 0 ? texto[i - 1] : '';
+    const despues = texto[i + racha];
+    const blancoAntes = !antes || /\s/.test(antes);
+    const blancoDespues = despues === undefined || /\s/.test(despues);
+    // «_» no cierra si le sigue una letra («notas_finales»), ni abre si
+    // le precede una («mi_tesis»).
+    const puedeCerrar =
+      !blancoAntes && !(letra === '_' && ALFANUMERICO.test(texto[i + marca.length] || ''));
+    const puedeAbrir = !blancoDespues && !(letra === '_' && ALFANUMERICO.test(antes || ''));
+    if (puedeCerrar && racha >= marca.length) return i;
+    if (puedeAbrir && !puedeCerrar) {
+      const dentro = racha >= 3 ? 3 : racha;
+      const marcaDentro = letra.repeat(dentro);
+      const cierre = buscarCierreEnfasis(texto, i + dentro, marcaDentro);
+      if (cierre !== -1) {
+        i = cierre + dentro;
+        continue;
+      }
+    }
+    i += racha;
   }
   return -1;
 }
