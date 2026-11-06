@@ -408,6 +408,16 @@ function propiedadesTexto(a, base, extra) {
   // lo que ya lleva el estilo no se repite en la corrida.
   if (extra && extra.rStyle) {
     r.push(`<w:rStyle w:val="${esc(extra.rStyle)}"/>`);
+    // Lo anidado dentro del estilo de carácter va en formato directo
+    // encima de él (negrita dentro de cursiva, cursiva dentro de cursiva
+    // en redonda). Antes se perdía.
+    if (extra.negrita === true) r.push('<w:b/>');
+    if (extra.cursiva === true) r.push('<w:i/>');
+    if (extra.cursiva === false) r.push('<w:i w:val="0"/>');
+    if (extra.tachado) r.push('<w:strike/>');
+    if (extra.subrayado) r.push('<w:u w:val="single"/>');
+    if (extra.fondo) r.push(`<w:shd w:val="clear" w:color="auto" w:fill="${esc(String(extra.fondo).replace('#', ''))}"/>`);
+    if (extra.color) r.push(`<w:color w:val="${esc(String(extra.color).replace('#', ''))}"/>`);
     if (extra.superindice) r.push('<w:vertAlign w:val="superscript"/>');
     return `<w:rPr>${ordenar(r, ORDEN_RPR).join('')}</w:rPr>`;
   }
@@ -421,6 +431,7 @@ function propiedadesTexto(a, base, extra) {
   const cursiva = extra && extra.cursiva !== undefined ? extra.cursiva : a.cursiva;
   if (negrita) r.push('<w:b/>');
   if (cursiva) r.push('<w:i/>');
+  else if (extra && extra.cursiva === false && extra.enEmAnidado) r.push('<w:i w:val="0"/>');
 
   const tachado = extra && extra.tachado !== undefined ? extra.tachado : a.tachado;
   if (tachado) r.push('<w:strike/>');
@@ -521,11 +532,18 @@ function corridas(nodos, ctx, herencia) {
         salida.push('<w:r><w:br/></w:r>');
         break;
 
-      case 'strong':
       case 'em':
+        if (h.enEm) {
+          // Cursiva dentro de cursiva: en redonda.
+          salida.push(...corridas(nodo.hijos, ctx, unir(h, { cursiva: false, enEm: false, enEmAnidado: true })));
+          break;
+        }
+      // falls through
+      case 'strong':
       case 'del':
       case 'mark': {
-        const nueva = aplicarInline(nodo.tipo, ctx, h);
+        let nueva = aplicarInline(nodo.tipo, ctx, h);
+        if (nueva && nodo.tipo === 'em') nueva = unir(nueva, { enEm: true, cursiva: h.enEmAnidado ? true : nueva.cursiva });
         if (nueva) salida.push(...corridas(nodo.hijos, ctx, nueva));
         break;
       }

@@ -450,7 +450,9 @@ function construirTypst(documento, hoja, opciones) {
             recorrer(nodo.hijos, Object.assign({}, est, { negrita: true }), extra);
             break;
           case 'em':
-            recorrer(nodo.hijos, Object.assign({}, est, { cursiva: true }), extra);
+            // Cursiva dentro de cursiva va en redonda (y al revés), como
+            // manda la norma tipográfica: «*(…el *Poison* de Dior…)*».
+            recorrer(nodo.hijos, Object.assign({}, est, { cursiva: est.enEm ? !est.cursiva : true, enEm: !est.enEm }), extra);
             break;
           case 'del':
             recorrer(nodo.hijos, est, Object.assign({}, extra, { tachar: true }));
@@ -1413,7 +1415,7 @@ function construirTypst(documento, hoja, opciones) {
             desplegarTramos(nodo.hijos, Object.assign({}, est, { negrita: true }), acumulador);
             break;
           case 'em':
-            desplegarTramos(nodo.hijos, Object.assign({}, est, { cursiva: true }), acumulador);
+            desplegarTramos(nodo.hijos, Object.assign({}, est, { cursiva: est.enEm ? !est.cursiva : true, enEm: !est.enEm }), acumulador);
             break;
           case 'wikilink':
             acumulador.push({ texto: colapsar(nodo.alias || nodo.destino), est });

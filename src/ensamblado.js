@@ -1658,6 +1658,8 @@ function construirCss(hoja, opciones) {
 
 
   reglas.push(`.ulysses p.verso.pegado { break-after: avoid; }`);
+  // Cursiva dentro de cursiva, en redonda (y al revés), como en el PDF.
+  reglas.push(`.ulysses em em { font-style: normal; } .ulysses em em em { font-style: italic; }`);
   reglas.push(`.ulysses p.continuacion { padding-top: 0; }`);
   reglas.push(`.ulysses p.continuacion:not(.verso) { text-indent: 0; }`);
 
