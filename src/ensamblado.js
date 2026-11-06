@@ -143,6 +143,20 @@ function modoDeLineas(bloque, opc) {
   return haySangria || todasCortas ? 'verso' : 'salto';
 }
 
+/**
+ * Margen superior del primer verso de una estrofa que viene detrás de
+ * otra (todo en pt). Entre estrofas queda lo mismo que entre párrafos
+ * (el margen de abajo del último verso más el de arriba del primero),
+ * pero nunca menos de media línea: hay estilos que apenas separan los
+ * párrafos (Universidad, 1 mm arriba y 1 mm abajo) y en ellos las
+ * estrofas se pegaban. Novela (12 pt sobre 21 pt de interlineado) ya
+ * pasaba de la media línea y no cambia.
+ */
+function margenEntreEstrofas(margenArriba, margenAbajo, interlineado, tamano) {
+  const linea = interlineado || 1.2 * (tamano || 12);
+  return Math.max(margenArriba || 0, linea / 2 - (margenAbajo || 0));
+}
+
 /** Nombre del estilo de Word: manda «style-title» de la hoja si lo hay. */
 function nombreEstilo(hoja, selectores, porDefecto) {
   for (let i = selectores.length - 1; i >= 0; i--) {
@@ -763,6 +777,12 @@ function construirDocx(documento, hoja, opciones) {
               const extra = Object.assign({}, nombre ? { pStyle: nombre } : {}, pegados[k] ? { keepNext: true } : {});
               const a = conSangria(atrs, linea, k === 0, k === lineas.length - 1, true);
               if (k === 0 && bloque.continuacion) a.margenSuperior = 0;
+              else if (k === 0 && esVerso(bloques[idx - 1])) {
+                a.margenSuperior = margenEntreEstrofas(
+                  a.margenSuperior, atrs.margenInferior,
+                  atrs.interlineado || base.interlineado, atrs.tamano || base.tamano
+                );
+              }
               parrafo(linea.hijos, a, Object.keys(extra).length ? extra : null);
             });
           } else if (modo === 'parrafo') {
@@ -1648,12 +1668,21 @@ function construirCss(hoja, opciones) {
     // Ojo: el margen se quita ENTRE versos, no en el primero de cada
     // estrofa, o las estrofas se pegan unas a otras.
     reglas.push(
-      `.ulysses p.verso { padding-bottom: 0; break-inside: avoid; ` +
+      `.ulysses p.verso { break-inside: avoid; ` +
         `padding-left: ${pt(pts)}; text-indent: -${pt(pts)}; }`
     );
     // El margen se quita ENTRE versos de la misma estrofa: el primero de
-    // cada estrofa lleva «verso-ini» y conserva el suyo.
+    // cada estrofa lleva «verso-ini» y conserva el de arriba, y el último,
+    // «verso-fin», el de abajo, como el DOCX y el PDF.
+    reglas.push(`.ulysses p.verso:not(.verso-fin) { padding-bottom: 0; }`);
     reglas.push(`.ulysses p.verso + p.verso:not(.verso-ini) { padding-top: 0; }`);
+    // Entre estrofas, nunca menos de media línea (margenEntreEstrofas).
+    const ap = D.atributos(hoja, ['paragraph'], Object.assign({}, base));
+    const arriba = margenEntreEstrofas(
+      ap.margenSuperior, ap.margenInferior,
+      ap.interlineado || base.interlineado, ap.tamano || base.tamano
+    );
+    reglas.push(`.ulysses p.verso.verso-fin + p.verso.verso-ini:not(.continuacion) { padding-top: ${pt(arriba)}; }`);
   }
 
 
@@ -1965,6 +1994,7 @@ function bloquesHtml(bloques, opc) {
           if (lineas.length === 1 && esVerso(lista[idx + 1])) pegados[0] = true;
           lineas.forEach((l, k) => {
             let c = k === 0 ? 'verso verso-ini' : 'verso';
+            if (k === lineas.length - 1) c += ' verso-fin';
             if (pegados[k]) c += ' pegado';
             if (k === 0 && b.continuacion) c += ' continuacion';
             const cl = clase ? clase.replace('"', `"${c} `) : ` class="${c}"`;
@@ -2200,6 +2230,7 @@ module.exports = {
   anchoTabulador,
   sangriaDeLinea,
   modoDeLineas,
+  margenEntreEstrofas,
   bloqueEsDialogo,
   sangriaDialogo,
   lineaEsDialogo,

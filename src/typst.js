@@ -1090,8 +1090,16 @@ function construirTypst(documento, hoja, opciones) {
                 if (ctx.enCita && declCitaP) c.push(declCitaP);
               }
               const est = computar(padre, ...c);
-              est.pb = 0;
+              // Los versos de una estrofa van juntos; la estrofa conserva,
+              // como un párrafo, el margen de arriba de su primer verso y
+              // el de abajo del último (igual que el DOCX). Entre dos
+              // estrofas, al menos media línea: ver margenEntreEstrofas.
+              const pbParrafo = est.pb || 0;
+              if (k < lineas.length - 1) est.pb = 0;
               if (k > 0 || b.continuacion) est.pt = 0;
+              else if (esVerso(lista[idx - 1])) {
+                est.pt = E.margenEntreEstrofas(est.pt || 0, pbParrafo, est.interlineado, est.tamano);
+              }
               // padding-left sv + text-indent -sv (sangría francesa del
               // verso). Ojo: el HTML antiguo pone «text-indent: 0» en las
               // líneas sangradas con tabuladores, así que ahí no hay
